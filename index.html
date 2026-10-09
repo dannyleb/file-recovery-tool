@@ -450,6 +450,7 @@
   <button class="tb-btn" id="btn-recover-sel" onclick="recoverSelected()" disabled>Recover Selected</button>
   <button class="tb-btn" id="btn-recover-all" onclick="recoverAll()" disabled>Recover All</button>
   <div class="tb-spacer"></div>
+  <button class="tb-btn" id="btn-previews-only" onclick="togglePreviewsOnly()" disabled title="Show only files with valid image previews">Previews Only</button>
   <select id="type-filter" onchange="applyFilter()" disabled>
     <option value="">All Types</option>
   </select>
@@ -575,6 +576,9 @@ const S = {
   sortCol: 'offset',
   sortDir: 1,            // 1=asc, -1=desc
   typeFilter: '',
+  previewsOnly: false,
+  validPreviewIds: new Set(),
+  validPreviewsLoaded: false,
   selectedIds: new Set(),
   page: 0,
   PAGE_SIZE: 100,
@@ -748,7 +752,13 @@ function selectScan(id) {
   S.selectedIds.clear();
   S.page = 0;
   S.typeFilter = '';
+  S.previewsOnly = false;
+  S.validPreviewIds = new Set();
+  S.validPreviewsLoaded = false;
   document.getElementById('type-filter').value = '';
+  const pb = document.getElementById('btn-previews-only');
+  pb.textContent = 'Previews Only';
+  pb.style.background = pb.style.color = pb.style.borderColor = '';
 
   // Highlight in sidebar
   document.querySelectorAll('.scan-item').forEach(el => {
@@ -787,6 +797,7 @@ function loadFiles(db, scanId) {
   setStatus(`Scan ${scanId}  ·  ${src}  ·  ${S.allFiles.length.toLocaleString()} files found`);
 
   document.getElementById('btn-recover-all').disabled = S.allFiles.length === 0;
+  document.getElementById('btn-previews-only').disabled = !S.serverUrl;
   loadErrors(db, scanId);
 }
 
@@ -812,11 +823,41 @@ function updateProgress(db, scanId) {
 // ============================================================
 function applyFilter(resetPage = true) {
   S.typeFilter = document.getElementById('type-filter').value;
-  S.filtered = S.typeFilter
-    ? S.allFiles.filter(f => f.file_type === S.typeFilter)
-    : [...S.allFiles];
+  S.filtered = S.allFiles.filter(f => {
+    if (S.typeFilter && f.file_type !== S.typeFilter) return false;
+    if (S.previewsOnly && !S.validPreviewIds.has(f.id)) return false;
+    return true;
+  });
   if (resetPage) S.page = 0;
   sortAndRender();
+}
+
+async function togglePreviewsOnly() {
+  const btn = document.getElementById('btn-previews-only');
+
+  if (!S.validPreviewsLoaded && S.serverUrl) {
+    btn.textContent = 'Validating…';
+    btn.disabled = true;
+    try {
+      const res  = await fetch(`${S.serverUrl}/api/scans/${S.currentScanId}/valid-previews`);
+      const data = await res.json();
+      S.validPreviewIds = new Set(data.valid);
+      S.validPreviewsLoaded = true;
+    } catch (e) {
+      btn.textContent = 'Previews Only';
+      btn.disabled = false;
+      alert('Could not validate previews: ' + e.message);
+      return;
+    }
+  }
+
+  S.previewsOnly = !S.previewsOnly;
+  btn.textContent  = S.previewsOnly ? `Previews Only (${S.validPreviewIds.size})` : 'Previews Only';
+  btn.style.background    = S.previewsOnly ? 'var(--blue)' : '';
+  btn.style.color         = S.previewsOnly ? 'white' : '';
+  btn.style.borderColor   = S.previewsOnly ? 'var(--blue)' : '';
+  btn.disabled = false;
+  applyFilter();
 }
 
 function sortBy(col) {

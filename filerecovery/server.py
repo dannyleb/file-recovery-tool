@@ -23,6 +23,18 @@ from .source import Source
 DEFAULT_PORT = 7523
 PREVIEW_CAP  = 10 * 1024 * 1024  # 10 MB max sent for preview
 
+# Strict per-type header validators — read 16 bytes, return True if genuinely valid
+_VALIDATORS = {
+    "JPEG":   lambda b: len(b) >= 4 and b[:3] == b"\xff\xd8\xff" and b[3] in {
+                  0xe0,0xe1,0xe2,0xe3,0xe4,0xe5,0xe6,0xe7,
+                  0xe8,0xe9,0xea,0xeb,0xec,0xed,0xee,0xef,
+                  0xdb,0xc0,0xc1,0xc2,0xc3,0xc4,0xc5,0xc6,
+              },
+    "PNG":    lambda b: b[:8] == b"\x89PNG\r\n\x1a\n",
+    "GIF":    lambda b: b[:6] in (b"GIF87a", b"GIF89a"),
+    "BMP":    lambda b: len(b) >= 6 and b[:2] == b"BM" and int.from_bytes(b[2:6], "little") > 54,
+}
+
 _MIME = {
     "JPEG": "image/jpeg",
     "PNG":  "image/png",
@@ -96,6 +108,8 @@ class _Handler(BaseHTTPRequestHandler):
                     "file_date":      f.file_date,
                     "recovered_path": f.recovered_path,
                 } for f in files])
+            elif len(parts) >= 5 and parts[4] == "valid-previews":
+                self._valid_previews(scan_id)
             else:
                 with ScanDB(self.server.db_path) as db:
                     row = db.get_scan(scan_id)
@@ -137,6 +151,26 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _valid_previews(self, scan_id: int):
+        src = self.server.source_path
+        if not src:
+            return self._json({"error": "no source configured"}, 503)
+
+        with ScanDB(self.server.db_path) as db:
+            files = [f for f in db.list_found_files(scan_id) if f.file_type in _VALIDATORS]
+
+        valid = []
+        with Source(src) as source:
+            for f in files:
+                try:
+                    header = source.read_at(f.offset, 16)
+                    if _VALIDATORS[f.file_type](header):
+                        valid.append(f.id)
+                except Exception:
+                    pass
+
+        self._json({"valid": valid})
 
     def _recover(self, body: dict):
         from .recover import RecoveryError, recover_file
