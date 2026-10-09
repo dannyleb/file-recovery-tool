@@ -341,6 +341,68 @@
     }
 
     /* ================================================================
+       ERROR / STALL BANNER
+    ================================================================ */
+    #error-banner {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 14px;
+      background: #FFF0F0;
+      border-bottom: 1px solid #FFCDD2;
+      font-size: 12px;
+      color: var(--red);
+      flex-shrink: 0;
+    }
+    #error-banner.stall { background: #FFF8E1; border-color: #FFE082; color: #B45309; }
+    #error-banner .err-icon { font-size: 14px; flex-shrink: 0; }
+    #error-banner .err-msg  { flex: 1; }
+    #error-banner .err-detail-btn {
+      background: none; border: 1px solid currentColor; border-radius: 5px;
+      padding: 2px 8px; font-size: 11px; cursor: pointer; color: inherit;
+      white-space: nowrap;
+    }
+
+    /* Error log drawer */
+    #error-log {
+      display: none;
+      flex-direction: column;
+      border-top: 1px solid var(--border);
+      background: #1C1C1E;
+      color: #E5E5EA;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 11px;
+      max-height: 160px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+    #error-log .log-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 5px 12px;
+      background: #2C2C2E;
+      font-size: 11px;
+      font-family: -apple-system, sans-serif;
+      color: #AEAEB2;
+      position: sticky; top: 0;
+    }
+    #error-log .log-header button {
+      background: none; border: none; color: #AEAEB2; cursor: pointer; font-size: 13px; padding: 0 4px;
+    }
+    .log-entry {
+      display: grid;
+      grid-template-columns: 90px 90px 1fr;
+      gap: 0 12px;
+      padding: 4px 12px;
+      border-bottom: 1px solid #2C2C2E;
+      line-height: 1.5;
+    }
+    .log-entry .log-time  { color: #636366; }
+    .log-entry .log-type  { color: #FF9F0A; }
+    .log-entry .log-msg   { color: #FF453A; word-break: break-all; white-space: pre-wrap; }
+    .log-entry .log-offset { color: #636366; font-size: 10px; }
+    .log-no-errors { padding: 10px 12px; color: #636366; }
+
+    /* ================================================================
        MODAL (CLI command overlay)
     ================================================================ */
     .modal-backdrop {
@@ -436,6 +498,22 @@
     <!-- Progress bar -->
     <div id="progress-wrap">
       <div id="progress-fill" style="width:0%"></div>
+    </div>
+
+    <!-- Error / stall banner -->
+    <div id="error-banner">
+      <span class="err-icon">⚠</span>
+      <span class="err-msg" id="error-banner-msg"></span>
+      <button class="err-detail-btn" onclick="toggleErrorLog()">Show log</button>
+    </div>
+
+    <!-- Error log drawer -->
+    <div id="error-log">
+      <div class="log-header">
+        <span>Error Log</span>
+        <button onclick="toggleErrorLog()">✕</button>
+      </div>
+      <div id="error-log-body"></div>
     </div>
 
   </div>
@@ -584,7 +662,14 @@ async function refreshDB() {
 function loadScans(db) {
   const res = db.exec('SELECT id,source_path,source_size,bytes_scanned,started_at,finished_at FROM scans ORDER BY id DESC');
   if (!res.length) return;
-  S.scans = res[0].values.map(([id,src,size,done,start,fin]) => ({id,src,size,done,start,fin}));
+  S.scans = res[0].values.map(([id,src,size,done,start,fin]) => ({id,src,size,done,start,fin,updatedAt:0}));
+  // fetch updatedAt separately
+  try {
+    const ua = db.exec('SELECT id, updated_at FROM scans ORDER BY id DESC');
+    if (ua.length) ua[0].values.forEach(([id, upd]) => {
+      const s = S.scans.find(x => x.id === id); if (s) s.updatedAt = upd;
+    });
+  } catch(e) {}
 
   const list = document.getElementById('scans-list');
   list.innerHTML = '';
@@ -650,6 +735,7 @@ function loadFiles(db, scanId) {
   setStatus(`Scan ${scanId}  ·  ${src}  ·  ${S.allFiles.length.toLocaleString()} files found`);
 
   document.getElementById('btn-recover-all').disabled = S.allFiles.length === 0;
+  loadErrors(db, scanId);
 }
 
 function updateProgress(db, scanId) {
@@ -947,6 +1033,73 @@ function showCLIRecovery(files, srcPath) {
     `Source is a raw device (${srcPath}) — browsers can't read raw disks.\nRun this command in your terminal:`,
     cmd
   );
+}
+
+// ============================================================
+// ERROR LOG
+// ============================================================
+function loadErrors(db, scanId) {
+  const banner  = document.getElementById('error-banner');
+  const bannerMsg = document.getElementById('error-banner-msg');
+  const logBody = document.getElementById('error-log-body');
+
+  // Query errors table (may not exist on older DBs)
+  let errors = [];
+  try {
+    const res = db.exec(
+      `SELECT occurred_at, error_type, message, offset FROM scan_errors
+       WHERE scan_id=${scanId} ORDER BY occurred_at DESC LIMIT 200`
+    );
+    if (res.length) {
+      errors = res[0].values.map(([ts, type, msg, off]) => ({ ts, type, msg, off }));
+    }
+  } catch (e) { /* table doesn't exist yet — ignore */ }
+
+  // Stall detection: scan not finished but updated_at is old
+  const scan = S.scans.find(s => s.id === scanId);
+  const staleSecs = scan && !scan.fin ? (Date.now()/1000 - scan.updatedAt) : 0;
+  const isStalled = staleSecs > 60;
+
+  if (errors.length === 0 && !isStalled) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  banner.style.display = 'flex';
+  if (errors.length > 0) {
+    banner.className = '';
+    bannerMsg.textContent = `${errors.length} error${errors.length>1?'s':''} logged during scan`;
+  } else if (isStalled) {
+    banner.className = 'stall';
+    const mins = Math.round(staleSecs / 60);
+    bannerMsg.textContent = `Scan may have stopped — no progress for ${mins} minute${mins>1?'s':''}`;
+  }
+
+  if (errors.length === 0) {
+    logBody.innerHTML = '<div class="log-no-errors">No errors recorded — scan appears stalled (check terminal)</div>';
+    return;
+  }
+
+  logBody.innerHTML = errors.map(e => {
+    const t = new Date(e.ts * 1000).toLocaleTimeString();
+    const off = e.off != null ? `@ offset ${e.off.toLocaleString()}` : '';
+    return `<div class="log-entry">
+      <span class="log-time">${t}</span>
+      <span class="log-type">${e.type}</span>
+      <span class="log-msg">${escHtml(e.msg)} <span class="log-offset">${off}</span></span>
+    </div>`;
+  }).join('');
+}
+
+function toggleErrorLog() {
+  const log = document.getElementById('error-log');
+  log.style.display = log.style.display === 'flex' ? 'none' : 'flex';
+  const btn = document.querySelector('#error-banner .err-detail-btn');
+  if (btn) btn.textContent = log.style.display === 'flex' ? 'Hide log' : 'Show log';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ============================================================

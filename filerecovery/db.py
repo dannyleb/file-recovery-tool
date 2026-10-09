@@ -36,6 +36,17 @@ CREATE TABLE IF NOT EXISTS found_files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_found_files_scan ON found_files(scan_id);
+
+CREATE TABLE IF NOT EXISTS scan_errors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id INTEGER NOT NULL REFERENCES scans(id),
+    occurred_at REAL NOT NULL,
+    error_type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    offset INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_errors_scan ON scan_errors(scan_id);
 """
 
 
@@ -86,6 +97,13 @@ class ScanDB:
         self.conn.execute(
             "UPDATE scans SET bytes_scanned = ?, updated_at = ? WHERE id = ?",
             (bytes_scanned, time.time(), scan_id),
+        )
+        self.conn.commit()
+
+    def log_error(self, scan_id: int, error: Exception, offset: Optional[int] = None):
+        self.conn.execute(
+            "INSERT INTO scan_errors (scan_id, occurred_at, error_type, message, offset) VALUES (?, ?, ?, ?, ?)",
+            (scan_id, time.time(), type(error).__name__, str(error), offset),
         )
         self.conn.commit()
 

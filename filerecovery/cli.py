@@ -68,6 +68,9 @@ def cmd_scan(args):
         except KeyboardInterrupt:
             print(f"\nInterrupted. Resume with: filerecovery scan {args.device} --db {args.db} --resume {scan_id}")
             return 130
+        except Exception as e:
+            db.log_error(scan_id, e)
+            raise
         print(f"\nDone. Found {found} file(s) this run. Browse with: filerecovery list --db {args.db} {scan_id}")
         return 0
 

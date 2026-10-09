@@ -82,7 +82,11 @@ def scan(
             if true_offset < pos:
                 continue  # already inside a file we just recorded (or before start_offset)
 
-            length, truncated = sig.extent_fn(source, true_offset, sig)
+            try:
+                length, truncated = sig.extent_fn(source, true_offset, sig)
+            except Exception as e:
+                db.log_error(scan_id, e, offset=true_offset)
+                continue
             if length < sig.min_size:
                 continue  # extent function rejected this as a false positive
 
