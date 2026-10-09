@@ -1063,7 +1063,18 @@ async function loadPreviewImage(f) {
       document.getElementById('preview-icon').style.display = 'none';
       img.style.display = 'block';
     };
-    img.onerror = () => { img.style.display = 'none'; };
+    img.onerror = () => {
+      img.style.display = 'none';
+      // Evict from valid set so Previews Only filter self-corrects
+      if (S.validPreviewIds.has(f.id)) {
+        S.validPreviewIds.delete(f.id);
+        if (S.previewsOnly) {
+          const btn = document.getElementById('btn-previews-only');
+          btn.textContent = `Previews Only (${S.validPreviewIds.size})`;
+          applyFilter(false);
+        }
+      }
+    };
     img.src = `${S.serverUrl}/api/preview/${f.id}`;
     return;
   }
