@@ -503,12 +503,14 @@ class MainWindow(QMainWindow):
                 border: none;
                 border-right: 1px solid #D1D1D6;
                 font-size: 13px;
+                color: #1C1C1E;
                 outline: none;
             }
             QTreeWidget::item {
-                height: 30px;
+                height: 32px;
                 padding-left: 4px;
                 border-radius: 6px;
+                color: #1C1C1E;
             }
             QTreeWidget::item:selected {
                 background: #007AFF;
@@ -549,11 +551,12 @@ class MainWindow(QMainWindow):
                 border-radius: 6px;
                 padding: 3px 10px;
                 background: white;
+                color: #1C1C1E;
                 font-size: 13px;
             }
-            QToolButton:hover   { background: #E5E5EA; }
-            QToolButton:pressed { background: #D1D1D6; }
-            QToolButton:disabled { color: #AEAEB2; border-color: #E5E5EA; }
+            QToolButton:hover   { background: #E5E5EA; color: #1C1C1E; }
+            QToolButton:pressed { background: #D1D1D6; color: #1C1C1E; }
+            QToolButton:disabled { color: #AEAEB2; border-color: #E5E5EA; background: #F5F5F7; }
 
             QStatusBar {
                 background: #F2F2F7;
@@ -566,7 +569,14 @@ class MainWindow(QMainWindow):
                 border-radius: 6px;
                 padding: 3px 8px;
                 background: white;
+                color: #1C1C1E;
                 font-size: 13px;
+            }
+            QComboBox QAbstractItemView {
+                color: #1C1C1E;
+                background: white;
+                selection-background-color: #007AFF;
+                selection-color: white;
             }
             QProgressBar {
                 background: #E5E5EA;
@@ -630,11 +640,21 @@ class MainWindow(QMainWindow):
             self._sec_scans.removeChild(self._sec_scans.child(0))
 
         for s in self.db.list_scans():
-            pct    = int(s["bytes_scanned"] / s["source_size"] * 100) if s["source_size"] else 0
-            done   = "[done]" if s["finished_at"] else f"[{pct}%]"
-            label  = f"Scan {s['id']}  {done}  —  {os.path.basename(s['source_path'])}"
-            item   = QTreeWidgetItem([label])
+            pct  = int(s["bytes_scanned"] / s["source_size"] * 100) if s["source_size"] else 0
+            if s["finished_at"]:
+                badge = "✓"
+                badge_color = QColor("#34C759")
+            else:
+                badge = f"{pct}%"
+                badge_color = QColor("#FF9500")
+            label = f"{badge}  Scan {s['id']} — {os.path.basename(s['source_path'])}"
+            item  = QTreeWidgetItem([label])
             item.setData(0, Qt.ItemDataRole.UserRole, s["id"])
+            item.setForeground(0, QColor("#1C1C1E"))
+            # Colour just the badge portion isn't possible in a single item,
+            # but we can tint the whole row based on status
+            if not s["finished_at"]:
+                item.setForeground(0, QColor("#FF9500"))
             self._sec_scans.addChild(item)
 
         self._sec_scans.setExpanded(True)
