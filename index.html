@@ -633,6 +633,12 @@ async function openDB() {
 // LOCAL SERVER DETECTION
 // ============================================================
 async function detectServer() {
+  // If the page itself is being served from localhost, we are the server
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    S.serverUrl = window.location.origin;
+    setServerBadge(true);
+    return;
+  }
   const ports = [7523];
   for (const port of ports) {
     try {
@@ -947,7 +953,7 @@ function showPreview(id) {
 
   // Try to show image preview if source is open and it's an image
   const imgTypes = new Set(['JPEG','PNG','GIF','BMP']);
-  if (S.sourceHandle && imgTypes.has(f.file_type)) {
+  if ((S.sourceHandle || S.serverUrl) && imgTypes.has(f.file_type)) {
     loadPreviewImage(f);
   }
 

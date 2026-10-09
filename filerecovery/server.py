@@ -10,8 +10,11 @@ Chrome allows http://localhost from an https page (secure context exception).
 
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
+
+_INDEX = Path(__file__).parent.parent / "index.html"
 
 from .db import ScanDB
 from .source import Source
@@ -103,10 +106,24 @@ class _Handler(BaseHTTPRequestHandler):
             found_id = int(path.split("/")[3])
             self._serve_preview(found_id)
 
+        elif path in ("", "/", "/index.html"):
+            self._serve_index()
+
         else:
             self._json({"error": "not found"}, 404)
 
     # ------------------------------------------------------------------
+    def _serve_index(self):
+        try:
+            body = _INDEX.read_bytes()
+        except OSError:
+            return self._json({"error": "index.html not found"}, 404)
+        self.send_response(200)
+        self.send_header("Content-Type",   "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _serve_preview(self, found_id: int):
         src = self.server.source_path
         if not src:
