@@ -55,11 +55,18 @@ class Source:
             return b""
         length = min(length, self.size - offset)
 
-        # Serve from cache if the requested range is fully covered.
+        # Serve from cache when the request starts inside cached data.
+        # A partial hit (fewer bytes than requested) is fine — callers like
+        # _footer_search treat a short read as a truncated file rather than
+        # re-issuing an expensive disk read for every match in a dense cluster.
         c0, cd = self._cache_offset, self._cache_data
-        if c0 >= 0 and offset >= c0 and offset + length <= c0 + len(cd):
+        if c0 >= 0 and offset >= c0 and offset < c0 + len(cd):
             start = offset - c0
-            return cd[start: start + length]
+            available = cd[start: start + length]
+            if len(available) >= length:
+                return available          # full hit
+            if len(available) > 0:
+                return available          # partial hit — good enough for extent search
 
         # Raw devices on macOS require sector-aligned reads.
         sector = 512
