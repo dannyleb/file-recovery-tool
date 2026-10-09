@@ -404,12 +404,12 @@ class MainWindow(QMainWindow):
         section_font.setBold(True)
 
         self._sec_devices = QTreeWidgetItem(self.sidebar, ["DEVICES"])
-        self._sec_devices.setFlags(Qt.ItemFlag.NoItemFlags)
+        self._sec_devices.setFlags(Qt.ItemFlag.ItemIsEnabled)
         self._sec_devices.setFont(0, section_font)
         self._sec_devices.setForeground(0, QColor("#8E8E93"))
 
         self._sec_scans = QTreeWidgetItem(self.sidebar, ["SCANS"])
-        self._sec_scans.setFlags(Qt.ItemFlag.NoItemFlags)
+        self._sec_scans.setFlags(Qt.ItemFlag.ItemIsEnabled)
         self._sec_scans.setFont(0, section_font)
         self._sec_scans.setForeground(0, QColor("#8E8E93"))
 
