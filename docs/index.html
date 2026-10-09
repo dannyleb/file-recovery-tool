@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Recovery Monitor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue: #007AFF;
+      --green: #34C759;
+      --orange: #FF9500;
+      --red: #FF3B30;
+      --bg: #F2F2F7;
+      --surface: #FFFFFF;
+      --border: #D1D1D6;
+      --text: #1C1C1E;
+      --text2: #3A3A3C;
+      --text3: #8E8E93;
+      --radius: 12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    header {
+      max-width: 800px;
+      margin: 0 auto 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    #open-btn {
+      background: var(--blue);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    #open-btn:hover { opacity: 0.85; }
+    #open-btn:disabled { opacity: 0.4; cursor: default; }
+
+    main {
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      border: 1px solid var(--border);
+    }
+
+    /* ---- Landing state ---- */
+    #landing {
+      text-align: center;
+      padding: 60px 24px;
+    }
+    #landing .icon { font-size: 56px; margin-bottom: 16px; }
+    #landing h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+    #landing p { color: var(--text3); font-size: 14px; line-height: 1.6; max-width: 360px; margin: 0 auto 28px; }
+    #landing .open-big {
+      background: var(--blue); color: white; border: none;
+      border-radius: 10px; padding: 12px 28px;
+      font-size: 16px; font-weight: 600; cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    #landing .open-big:hover { opacity: 0.85; }
+    #browser-note {
+      margin-top: 20px;
+      font-size: 12px;
+      color: var(--text3);
+    }
+
+    /* ---- Scan selector ---- */
+    #scan-select-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #scan-select-row label { font-size: 13px; color: var(--text3); font-weight: 500; }
+    #scan-select {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-size: 14px;
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    /* ---- Progress section ---- */
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    #scan-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 14px;
+      color: var(--text2);
+    }
+
+    .progress-track {
+      background: var(--bg);
+      border-radius: 100px;
+      height: 10px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .progress-fill {
+      height: 100%;
+      border-radius: 100px;
+      background: var(--blue);
+      transition: width 0.5s ease;
+    }
+    .progress-fill.done { background: var(--green); }
+
+    .progress-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      color: var(--text3);
+    }
+    #pct-label { font-weight: 700; font-size: 15px; color: var(--text); }
+
+    /* ---- Stats grid ---- */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 4px;
+    }
+    @media (max-width: 600px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .stat-box {
+      background: var(--bg);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .stat-box .val {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .stat-box .lbl {
+      font-size: 11px;
+      color: var(--text3);
+      margin-top: 3px;
+    }
+    .stat-box.accent .val { color: var(--blue); }
+    .stat-box.green  .val { color: var(--green); }
+    .stat-box.orange .val { color: var(--orange); }
+
+    /* ---- Status badge ---- */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 100px;
+    }
+    .badge.scanning { background: #FFF3E0; color: var(--orange); }
+    .badge.done     { background: #E8F5E9; color: var(--green); }
+
+    .badge .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .badge.scanning .dot {
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ---- File types ---- */
+    .type-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--bg);
+    }
+    .type-row:last-child { border-bottom: none; }
+    .type-icon { font-size: 18px; width: 24px; text-align: center; }
+    .type-name { flex: 1; font-size: 14px; font-weight: 500; }
+    .type-bar-wrap { flex: 2; background: var(--bg); border-radius: 100px; height: 6px; }
+    .type-bar { height: 6px; border-radius: 100px; background: var(--blue); }
+    .type-count { font-size: 13px; color: var(--text3); min-width: 40px; text-align: right; }
+
+    /* ---- Refresh indicator ---- */
+    #refresh-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text3);
+    }
+    #last-updated { }
+    #refresh-countdown { }
+
+    /* ---- Error ---- */
+    #error-box {
+      background: #FFF0F0;
+      border: 1px solid #FFCDD2;
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      font-size: 14px;
+      color: var(--red);
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>File Recovery Monitor</h1>
+  <button id="open-btn" onclick="openDB()">Open DB</button>
+</header>
+
+<main>
+  <div id="error-box" class="hidden"></div>
+
+  <!-- Landing -->
+  <div id="landing" class="card">
+    <div class="icon">💾</div>
+    <h2>Monitor your scan in real time</h2>
+    <p>Open your <code>recovery.db</code> file to watch the scan progress, see files as they're found, and track estimated completion time.</p>
+    <button class="open-big" onclick="openDB()">Open recovery.db</button>
+    <p id="browser-note">Requires Chrome or Edge · Uses File System Access API to read your local DB</p>
+  </div>
+
+  <!-- Dashboard (hidden until DB opened) -->
+  <div id="dashboard" class="hidden">
+
+    <!-- Scan picker -->
+    <div class="card" id="scan-select-card">
+      <div id="scan-select-row">
+        <label for="scan-select">Scan</label>
+        <select id="scan-select" onchange="selectScan(this.value)"></select>
+        <span id="status-badge"></span>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="card">
+      <div class="section-label">Progress</div>
+      <div id="scan-title">—</div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+      </div>
+      <div class="progress-labels">
+        <span id="bytes-label">—</span>
+        <span id="pct-label">0%</span>
+      </div>
+
+      <div class="stats-grid" style="margin-top:16px">
+        <div class="stat-box accent">
+          <div class="val" id="stat-files">—</div>
+          <div class="lbl">Files found</div>
+        </div>
+        <div class="stat-box">
+          <div class="val" id="stat-speed">—</div>
+          <div class="lbl">Scan speed</div>
+        </div>
+        <div class="stat-box orange">
+          <div class="val" id="stat-eta">—</div>
+          <div class="lbl">Time remaining</div>
+        </div>
+        <div class="stat-box green">
+          <div class="val" id="stat-elapsed">—</div>
+          <div class="lbl">Elapsed</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- File types -->
+    <div class="card" id="types-card">
+      <div class="section-label">Files Found by Type</div>
+      <div id="types-list"></div>
+    </div>
+
+    <!-- Refresh footer -->
+    <div id="refresh-row">
+      <span id="last-updated">Never updated</span>
+      <span id="refresh-countdown"></span>
+    </div>
+
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.js"
+  integrity="sha512-9DkBn5i4e5tpnkFhVvL+ydLKcXLa9YTzz7IWTxHGnHVjfSl3n25vw2VFjH1BQYX8sPGBBMfEXKXY7R8QXxaA=="
+  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<script>
+  // ---- State ----
+  let fileHandle = null;
+  let SQL = null;
+  let currentScanId = null;
+  let pollInterval = null;
+  let countdown = 3;
+  let prevBytesScanned = null;
+  let prevBytesTime = null;
+
+  const TYPE_ICONS = {
+    JPEG: '🖼', PNG: '🖼', GIF: '🖼', BMP: '🖼',
+    PDF: '📄', ZIP: '📦', WAV: '🎵',
+    AVI: '🎬', MP4: '🎬', MOV: '🎬',
+    SQLite: '🗄',
+  };
+
+  // ---- Init sql.js ----
+  async function initSQL() {
+    if (SQL) return SQL;
+    SQL = await initSqlJs({
+      locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/${f}`
+    });
+    return SQL;
+  }
+
+  // ---- Open DB via File System Access API ----
+  async function openDB() {
+    if (!window.showOpenFilePicker) {
+      showError('Your browser does not support the File System Access API. Please use Chrome or Edge.');
+      return;
+    }
+    try {
+      [fileHandle] = await window.showOpenFilePicker({
+        types: [{ description: 'SQLite Database', accept: { 'application/octet-stream': ['.db'] } }],
+        multiple: false,
+      });
+    } catch (e) {
+      if (e.name !== 'AbortError') showError('Could not open file: ' + e.message);
+      return;
+    }
+
+    await initSQL();
+    clearError();
+    document.getElementById('landing').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+
+    await loadDB();
+    startPolling();
+  }
+
+  // ---- Read & query the DB ----
+  async function loadDB() {
+    if (!fileHandle || !SQL) return;
+    let db;
+    try {
+      const file = await fileHandle.getFile();
+      const buf = await file.arrayBuffer();
+      db = new SQL.Database(new Uint8Array(buf));
+    } catch (e) {
+      showError('Failed to read database: ' + e.message);
+      return;
+    }
+
+    try {
+      populateScans(db);
+      if (currentScanId !== null) {
+        updateDashboard(db, currentScanId);
+      }
+    } finally {
+      db.close();
+    }
+
+    const now = new Date();
+    document.getElementById('last-updated').textContent =
+      'Updated ' + now.toLocaleTimeString();
+    countdown = 3;
+  }
+
+  // ---- Populate scan selector ----
+  function populateScans(db) {
+    const scans = db.exec('SELECT id, source_path, source_size, bytes_scanned, started_at, finished_at FROM scans ORDER BY id DESC');
+    if (!scans.length) return;
+
+    const rows = scans[0].values;
+    const sel = document.getElementById('scan-select');
+    const prevVal = sel.value;
+
+    sel.innerHTML = '';
+    rows.forEach(([id, src, size, done, , fin]) => {
+      const pct = size ? Math.round(done / size * 100) : 0;
+      const label = fin
+        ? `Scan ${id} — ${basename(src)} ✓`
+        : `Scan ${id} — ${basename(src)} (${pct}%)`;
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    });
+
+    // Restore or auto-select
+    if (prevVal && [...sel.options].some(o => o.value == prevVal)) {
+      sel.value = prevVal;
+    } else {
+      sel.value = rows[0][0]; // most recent
+    }
+
+    if (currentScanId === null) {
+      currentScanId = parseInt(sel.value);
+    }
+  }
+
+  function selectScan(id) {
+    currentScanId = parseInt(id);
+    prevBytesScanned = null;
+    prevBytesTime = null;
+    loadDB();
+  }
+
+  // ---- Update dashboard for a scan ----
+  function updateDashboard(db, scanId) {
+    const scanRows = db.exec(
+      `SELECT source_path, source_size, bytes_scanned, started_at, updated_at, finished_at
+       FROM scans WHERE id = ${scanId}`
+    );
+    if (!scanRows.length || !scanRows[0].values.length) return;
+
+    const [src, size, done, startedAt, updatedAt, finishedAt] = scanRows[0].values[0];
+    const pct = size ? (done / size * 100) : 0;
+    const isDone = !!finishedAt;
+
+    // Title
+    document.getElementById('scan-title').textContent =
+      `Scan ${scanId} — ${src}`;
+
+    // Progress bar
+    const fill = document.getElementById('progress-fill');
+    fill.style.width = Math.min(pct, 100).toFixed(1) + '%';
+    fill.className = 'progress-fill' + (isDone ? ' done' : '');
+
+    document.getElementById('pct-label').textContent = pct.toFixed(1) + '%';
+    document.getElementById('bytes-label').textContent =
+      fmtSize(done) + ' / ' + fmtSize(size);
+
+    // Status badge
+    const badge = document.getElementById('status-badge');
+    badge.innerHTML = isDone
+      ? '<span class="badge done"><span class="dot"></span>Complete</span>'
+      : '<span class="badge scanning"><span class="dot"></span>Scanning…</span>';
+
+    // Files found
+    const fileRows = db.exec(
+      `SELECT COUNT(*) FROM found_files WHERE scan_id = ${scanId}`
+    );
+    const fileCount = fileRows.length ? fileRows[0].values[0][0] : 0;
+    document.getElementById('stat-files').textContent = fileCount.toLocaleString();
+
+    // Speed & ETA
+    const now = Date.now() / 1000;
+    let speedStr = '—';
+    let etaStr = isDone ? 'Done' : '—';
+
+    if (!isDone && prevBytesScanned !== null && prevBytesTime !== null) {
+      const deltaDone = done - prevBytesScanned;
+      const deltaTime = now - prevBytesTime;
+      if (deltaTime > 0 && deltaDone > 0) {
+        const speed = deltaDone / deltaTime;
+        speedStr = fmtSize(Math.round(speed)) + '/s';
+        const remaining = size - done;
+        if (remaining > 0) {
+          etaStr = fmtDuration(remaining / speed);
+        }
+      }
+    }
+    prevBytesScanned = done;
+    prevBytesTime = now;
+
+    document.getElementById('stat-speed').textContent = speedStr;
+    document.getElementById('stat-eta').textContent = etaStr;
+
+    // Elapsed
+    const elapsed = (isDone ? finishedAt : now) - startedAt;
+    document.getElementById('stat-elapsed').textContent = fmtDuration(elapsed);
+
+    // File type breakdown
+    const typeRows = db.exec(
+      `SELECT file_type, COUNT(*) as n FROM found_files
+       WHERE scan_id = ${scanId} GROUP BY file_type ORDER BY n DESC`
+    );
+    const typeList = document.getElementById('types-list');
+    if (typeRows.length && typeRows[0].values.length) {
+      const types = typeRows[0].values;
+      const max = types[0][1];
+      typeList.innerHTML = types.map(([type, count]) => `
+        <div class="type-row">
+          <span class="type-icon">${TYPE_ICONS[type] || '📁'}</span>
+          <span class="type-name">${type}</span>
+          <div class="type-bar-wrap">
+            <div class="type-bar" style="width:${(count / max * 100).toFixed(1)}%"></div>
+          </div>
+          <span class="type-count">${count.toLocaleString()}</span>
+        </div>`).join('');
+      document.getElementById('types-card').classList.remove('hidden');
+    } else {
+      typeList.innerHTML = '<p style="color:var(--text3);font-size:14px">No files found yet</p>';
+    }
+
+    // Stop polling when done
+    if (isDone && pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+      document.getElementById('refresh-countdown').textContent = '';
+    }
+  }
+
+  // ---- Polling ----
+  function startPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(async () => {
+      countdown--;
+      document.getElementById('refresh-countdown').textContent =
+        countdown > 0 ? `Refreshing in ${countdown}s…` : 'Refreshing…';
+      if (countdown <= 0) {
+        countdown = 3;
+        await loadDB();
+      }
+    }, 1000);
+  }
+
+  // ---- Helpers ----
+  function basename(path) {
+    return path ? path.replace(/^.*[/\\]/, '') : path;
+  }
+
+  function fmtSize(n) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + units[i];
+  }
+
+  function fmtDuration(secs) {
+    if (!isFinite(secs) || secs < 0) return '—';
+    secs = Math.round(secs);
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+
+  function showError(msg) {
+    const box = document.getElementById('error-box');
+    box.textContent = msg;
+    box.classList.remove('hidden');
+  }
+
+  function clearError() {
+    document.getElementById('error-box').classList.add('hidden');
+  }
+</script>
+
+</body>
+</html>
