@@ -9,6 +9,7 @@ Chrome allows http://localhost from an https page (secure context exception).
 """
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Optional
@@ -48,6 +49,19 @@ class _Handler(BaseHTTPRequestHandler):
         qs     = parse_qs(parsed.query)
         try:
             self._route(path, qs)
+        except Exception as exc:
+            self._json({"error": str(exc)}, 500)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path   = parsed.path.rstrip("/")
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body   = json.loads(self.rfile.read(length) or b"{}")
+            if path == "/api/recover":
+                self._recover(body)
+            else:
+                self._json({"error": "not found"}, 404)
         except Exception as exc:
             self._json({"error": str(exc)}, 500)
 
@@ -124,6 +138,36 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _recover(self, body: dict):
+        from .recover import RecoveryError, recover_file
+        src = self.server.source_path
+        if not src:
+            return self._json({"error": "no source configured — restart server with --source"}, 503)
+
+        scan_id = body.get("scan_id")
+        ids     = body.get("ids")      # list of ints, or "all"
+        dest    = body.get("dest", os.path.expanduser("~/recovered"))
+        dest    = os.path.expanduser(dest)
+
+        with ScanDB(self.server.db_path) as db:
+            if ids == "all":
+                targets = list(db.list_found_files(scan_id))
+            else:
+                targets = [db.get_found_file(int(i)) for i in ids]
+                targets = [f for f in targets if f is not None]
+
+            results = []
+            errors  = []
+            with Source(src) as source:
+                for f in targets:
+                    try:
+                        path = recover_file(source, db, f, dest)
+                        results.append({"id": f.id, "path": path})
+                    except RecoveryError as e:
+                        errors.append({"id": f.id, "error": str(e)})
+
+        self._json({"recovered": results, "errors": errors})
+
     def _serve_preview(self, found_id: int):
         src = self.server.source_path
         if not src:
@@ -159,7 +203,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin",  "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
 
