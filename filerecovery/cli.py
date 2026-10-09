@@ -166,7 +166,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_recover.add_argument("--dest", required=True, help="Destination directory (must NOT be on the source disk)")
     p_recover.set_defaults(func=cmd_recover)
 
+    p_serve = sub.add_parser("serve", help="Run local API server for the web GUI (image previews)")
+    p_serve.add_argument("--db",     required=True, help="Path to scan database")
+    p_serve.add_argument("--source", default=None,  help="Source device/image for preview reads (e.g. /dev/rdisk2)")
+    p_serve.add_argument("--port",   type=int, default=7523)
+    p_serve.set_defaults(func=cmd_serve)
+
     return p
+
+
+def cmd_serve(args):
+    from .server import serve
+    serve(args.db, args.source, args.port)
 
 
 def main(argv=None) -> int:

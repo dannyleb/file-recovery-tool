@@ -566,6 +566,7 @@ const S = {
   SQL: null,
   dbHandle: null,
   sourceHandle: null,
+  serverUrl: null,       // e.g. "http://localhost:7523" when local server detected
   currentScanId: null,
   scans: [],             // [{id, source_path, source_size, bytes_scanned, started_at, finished_at}]
   allFiles: [],          // FoundFile objects for current scan
@@ -615,6 +616,7 @@ async function openDB() {
 
   await initSQL();
   S.dbHandle = handle;
+  await detectServer();
 
   // Show table UI
   document.getElementById('landing').classList.add('hidden');
@@ -625,6 +627,46 @@ async function openDB() {
 
   await refreshDB();
   startPolling();
+}
+
+// ============================================================
+// LOCAL SERVER DETECTION
+// ============================================================
+async function detectServer() {
+  const ports = [7523];
+  for (const port of ports) {
+    try {
+      const r = await fetch(`http://localhost:${port}/api/status`, { signal: AbortSignal.timeout(800) });
+      if (r.ok) {
+        S.serverUrl = `http://localhost:${port}`;
+        setServerBadge(true);
+        return;
+      }
+    } catch (_) {}
+  }
+  S.serverUrl = null;
+  setServerBadge(false);
+}
+
+function setServerBadge(connected) {
+  let badge = document.getElementById('server-badge');
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.id = 'server-badge';
+    badge.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:100px;margin-left:6px;';
+    document.getElementById('toolbar').appendChild(badge);
+  }
+  if (connected) {
+    badge.textContent = '⬤ Server';
+    badge.style.background = '#E8F5E9';
+    badge.style.color = '#34C759';
+    badge.title = 'Local server connected — image previews enabled';
+  } else {
+    badge.textContent = '⬤ No server';
+    badge.style.background = '#F2F2F7';
+    badge.style.color = '#8E8E93';
+    badge.title = 'Run: sudo filerecovery serve --db /path/recovery.db --source /dev/rdisk2';
+  }
 }
 
 // ============================================================
@@ -928,22 +970,35 @@ function showPreview(id) {
 }
 
 async function loadPreviewImage(f) {
+  const img = document.getElementById('preview-img');
+
+  // Prefer local server (works with raw devices)
+  if (S.serverUrl) {
+    img.onload = () => {
+      document.getElementById('preview-icon').style.display = 'none';
+      img.style.display = 'block';
+    };
+    img.onerror = () => { img.style.display = 'none'; };
+    img.src = `${S.serverUrl}/api/preview/${f.id}`;
+    return;
+  }
+
+  // Fallback: File System Access API (works for image files, not raw devices)
+  if (!S.sourceHandle) return;
   try {
-    const file   = await S.sourceHandle.getFile();
-    const slice  = file.slice(f.offset, f.offset + Math.min(f.length, 512*1024));
-    const mime   = f.file_type === 'JPEG' ? 'image/jpeg'
-                 : f.file_type === 'PNG'  ? 'image/png'
-                 : f.file_type === 'GIF'  ? 'image/gif'
-                 : 'image/bmp';
-    const blob   = new Blob([await slice.arrayBuffer()], { type: mime });
-    const url    = URL.createObjectURL(blob);
-    const img    = document.getElementById('preview-img');
-    img.onload   = () => {
+    const file  = await S.sourceHandle.getFile();
+    const slice = file.slice(f.offset, f.offset + Math.min(f.length, 512*1024));
+    const mime  = f.file_type === 'JPEG' ? 'image/jpeg'
+                : f.file_type === 'PNG'  ? 'image/png'
+                : f.file_type === 'GIF'  ? 'image/gif'
+                : 'image/bmp';
+    const url   = URL.createObjectURL(new Blob([await slice.arrayBuffer()], { type: mime }));
+    img.onload  = () => {
       document.getElementById('preview-icon').style.display = 'none';
       img.style.display = 'block';
     };
     img.src = url;
-  } catch (e) { /* preview unavailable */ }
+  } catch (_) {}
 }
 
 // ============================================================
@@ -1109,10 +1164,12 @@ function escHtml(s) {
 // ============================================================
 function startPolling() {
   if (S.pollTimer) clearInterval(S.pollTimer);
+  let tick = 0;
   S.pollTimer = setInterval(async () => {
     const scan = S.scans.find(s => s.id === S.currentScanId);
     if (scan && scan.fin) { clearInterval(S.pollTimer); S.pollTimer = null; return; }
     await refreshDB();
+    if (++tick % 3 === 0) detectServer(); // re-check server every ~9s
   }, 3000);
 }
 
