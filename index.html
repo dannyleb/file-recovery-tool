@@ -1086,10 +1086,10 @@ async function readSlice(file, offset, length) {
 }
 
 function showCLIRecovery(files, srcPath) {
-  const ids = files.map(f => f.id).join(',');
+  const ids = files.map(f => f.id).join(' ');
   const cmd = files.length === S.allFiles.length
-    ? `filerecovery recover ${S.currentScanId} --db=/Users/dannyleblanc/recovery.db --dest=~/recovered`
-    : `filerecovery recover ${S.currentScanId} --ids=${ids} --db=/Users/dannyleblanc/recovery.db --dest=~/recovered`;
+    ? `filerecovery recover ${S.currentScanId} all --db=/Users/dannyleblanc/recovery.db --dest=~/recovered`
+    : `filerecovery recover ${S.currentScanId} ${ids} --db=/Users/dannyleblanc/recovery.db --dest=~/recovered`;
 
   showModal(
     'Recover via Terminal',
