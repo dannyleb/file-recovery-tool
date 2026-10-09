@@ -780,7 +780,7 @@ function loadFiles(db, scanId) {
   if (prev && types.includes(prev)) sel.value = prev;
   sel.disabled = false;
 
-  applyFilter();
+  applyFilter(false);
 
   const scan = S.scans.find(s => s.id === scanId);
   const src  = scan ? basename(scan.src) : '?';
@@ -810,12 +810,12 @@ function updateProgress(db, scanId) {
 // ============================================================
 // FILTER & SORT
 // ============================================================
-function applyFilter() {
+function applyFilter(resetPage = true) {
   S.typeFilter = document.getElementById('type-filter').value;
   S.filtered = S.typeFilter
     ? S.allFiles.filter(f => f.file_type === S.typeFilter)
     : [...S.allFiles];
-  S.page = 0;
+  if (resetPage) S.page = 0;
   sortAndRender();
 }
 
