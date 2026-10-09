@@ -33,7 +33,43 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-This installs the `filerecovery` command into your virtualenv.
+This installs the `filerecovery` CLI command into your virtualenv.
+
+To also install the desktop GUI:
+
+```bash
+pip install -e ".[gui]"
+```
+
+## GUI
+
+The graphical interface lets you select a drive, watch the scan run live, browse found files with image previews and dates, and restore files to a destination — no terminal required.
+
+**Launch:**
+
+```bash
+filerecovery-gui
+```
+
+Raw disk access requires root on macOS and Linux. If you see a permission error after selecting a drive, relaunch with:
+
+```bash
+sudo filerecovery-gui
+```
+
+**Workflow:**
+
+1. **Open / New DB** (toolbar) — create or open a `.db` file to store scan results. Scan databases are portable; you can run the scan now and browse/recover later.
+2. **Select a drive** in the left sidebar under *Devices*, then click **Scan Disk…**.
+3. Watch the progress bar and live file count. You can click into the results table while the scan is still running.
+4. When the scan finishes, image files (JPEG, PNG, GIF, BMP) automatically load thumbnails in the background. The right-side panel shows a preview and metadata — type, size, date (extracted from EXIF/file headers where available), and byte offset.
+5. Select one or more rows and click **Recover Selected**, or use **Recover All**, to copy the files to a folder you choose. The destination must be on a *different* drive from the one being scanned.
+
+Previous scans are listed under *Scans* in the sidebar and can be reopened at any time.
+
+**Dates:** For JPEG files the date shown is the EXIF `DateTimeOriginal` field if present. For PNG files it comes from the `Creation Time` tEXt chunk. For MP4/MOV files it comes from the `mvhd` box. Files without embedded date metadata show a blank date field.
+
+**Filenames:** Signature-based carving cannot recover original filenames. Recovered files are named by type and disk offset (e.g. `jpeg_000005206000.jpg`), which makes them uniquely identifiable and easy to sort.
 
 ## Usage
 
