@@ -11,7 +11,11 @@ requires-python = ">=3.9"
 license = { text = "MIT" }
 
 [project.scripts]
-filerecovery = "filerecovery.cli:main"
+filerecovery     = "filerecovery.cli:main"
+filerecovery-gui = "filerecovery.gui:main"
+
+[project.optional-dependencies]
+gui = ["PyQt6", "Pillow>=10.0"]
 
 [tool.setuptools]
 packages = ["filerecovery"]

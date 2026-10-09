@@ -8,6 +8,11 @@ from .db import ScanDB
 from .signatures import SIGNATURES
 from .source import Source
 
+try:
+    from .metadata import extract_date as _extract_date
+except ImportError:
+    _extract_date = None  # Pillow not installed; dates won't be extracted
+
 DEFAULT_CHUNK_SIZE = 16 * 1024 * 1024
 
 ProgressCallback = Callable[[int, int], None]  # (bytes_scanned, total_size)
@@ -72,7 +77,15 @@ def scan(
             if length < sig.min_size:
                 continue  # extent function rejected this as a false positive
 
-            db.add_found_file(scan_id, sig.name, sig.extension, true_offset, length, truncated)
+            file_date = None
+            if _extract_date is not None:
+                raw = source.read_at(true_offset, min(length, 65536))
+                try:
+                    file_date = _extract_date(sig.name, raw)
+                except Exception:
+                    pass
+
+            db.add_found_file(scan_id, sig.name, sig.extension, true_offset, length, truncated, file_date)
             found_count += 1
             pos = true_offset + length
 

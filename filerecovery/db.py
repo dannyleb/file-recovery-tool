@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS found_files (
     offset INTEGER NOT NULL,
     length INTEGER NOT NULL,
     truncated INTEGER NOT NULL,
+    file_date REAL,
     recovered_path TEXT,
     recovered_at REAL
 );
@@ -47,6 +48,7 @@ class FoundFile:
     offset: int
     length: int
     truncated: bool
+    file_date: Optional[float]
     recovered_path: Optional[str]
     recovered_at: Optional[float]
 
@@ -57,6 +59,12 @@ class ScanDB:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self.conn.commit()
+        # Migrate pre-existing databases that lack newer columns
+        try:
+            self.conn.execute("ALTER TABLE found_files ADD COLUMN file_date REAL")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     def start_scan(self, source_path: str, source_size: int) -> int:
         now = time.time()
@@ -85,11 +93,20 @@ class ScanDB:
         self.conn.execute("UPDATE scans SET finished_at = ? WHERE id = ?", (time.time(), scan_id))
         self.conn.commit()
 
-    def add_found_file(self, scan_id: int, file_type: str, extension: str, offset: int, length: int, truncated: bool) -> int:
+    def add_found_file(
+        self,
+        scan_id: int,
+        file_type: str,
+        extension: str,
+        offset: int,
+        length: int,
+        truncated: bool,
+        file_date: Optional[float] = None,
+    ) -> int:
         cur = self.conn.execute(
-            "INSERT INTO found_files (scan_id, file_type, extension, offset, length, truncated) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (scan_id, file_type, extension, offset, length, int(truncated)),
+            "INSERT INTO found_files (scan_id, file_type, extension, offset, length, truncated, file_date) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (scan_id, file_type, extension, offset, length, int(truncated), file_date),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -120,7 +137,8 @@ class ScanDB:
         for r in rows:
             yield FoundFile(
                 r["id"], r["scan_id"], r["file_type"], r["extension"], r["offset"],
-                r["length"], bool(r["truncated"]), r["recovered_path"], r["recovered_at"],
+                r["length"], bool(r["truncated"]), r["file_date"],
+                r["recovered_path"], r["recovered_at"],
             )
 
     def get_found_file(self, found_id: int) -> Optional[FoundFile]:
@@ -129,7 +147,8 @@ class ScanDB:
             return None
         return FoundFile(
             r["id"], r["scan_id"], r["file_type"], r["extension"], r["offset"],
-            r["length"], bool(r["truncated"]), r["recovered_path"], r["recovered_at"],
+            r["length"], bool(r["truncated"]), r["file_date"],
+            r["recovered_path"], r["recovered_at"],
         )
 
     def close(self):
