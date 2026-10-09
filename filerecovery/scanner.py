@@ -51,6 +51,15 @@ def scan(
 
         chunk = source.read_at(read_pos, chunk_size)
         if not chunk:
+            if read_pos == start_offset:
+                # First read returned nothing — almost always macOS Full Disk
+                # Access blocking the terminal app even under sudo.
+                raise PermissionError(
+                    f"Read returned 0 bytes from {source.path} at offset 0.\n\n"
+                    "On macOS, grant Full Disk Access to your terminal app:\n"
+                    "  System Settings → Privacy & Security → Full Disk Access\n"
+                    "Then relaunch your terminal and run the scan again with sudo."
+                )
             break
         buf = prev_tail + chunk
         buf_start = read_pos - len(prev_tail)
