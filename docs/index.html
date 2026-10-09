@@ -3,595 +3,1006 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>File Recovery Monitor</title>
+  <title>File Recovery</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --blue: #007AFF;
-      --green: #34C759;
-      --orange: #FF9500;
-      --red: #FF3B30;
-      --bg: #F2F2F7;
+      --blue:    #007AFF;
+      --green:   #34C759;
+      --orange:  #FF9500;
+      --red:     #FF3B30;
+      --bg:      #F2F2F7;
       --surface: #FFFFFF;
-      --border: #D1D1D6;
-      --text: #1C1C1E;
-      --text2: #3A3A3C;
-      --text3: #8E8E93;
-      --radius: 12px;
+      --border:  #D1D1D6;
+      --border2: #E5E5EA;
+      --text:    #1C1C1E;
+      --text2:   #3A3A3C;
+      --text3:   #8E8E93;
+      --sidebar-bg: #F2F2F7;
     }
+
+    html, body { height: 100%; overflow: hidden; }
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
+      font-size: 13px;
+      background: var(--surface);
       color: var(--text);
-      min-height: 100vh;
-      padding: 24px 16px;
-    }
-
-    header {
-      max-width: 800px;
-      margin: 0 auto 24px;
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+      flex-direction: column;
     }
 
-    h1 {
-      font-size: 22px;
-      font-weight: 700;
-      letter-spacing: -0.3px;
-    }
-
-    #open-btn {
-      background: var(--blue);
-      color: white;
-      border: none;
-      border-radius: 8px;
-      padding: 8px 18px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
+    /* ================================================================
+       TOOLBAR
+    ================================================================ */
+    #toolbar {
       display: flex;
       align-items: center;
       gap: 6px;
-      transition: opacity 0.15s;
+      padding: 5px 10px;
+      background: #F5F5F7;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    .tb-btn {
+      border: 1px solid #C7C7CC;
+      border-radius: 6px;
+      padding: 3px 11px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
       white-space: nowrap;
     }
-    #open-btn:hover { opacity: 0.85; }
-    #open-btn:disabled { opacity: 0.4; cursor: default; }
+    .tb-btn:hover:not(:disabled)   { background: #E5E5EA; }
+    .tb-btn:active:not(:disabled)  { background: #D1D1D6; }
+    .tb-btn:disabled { color: #AEAEB2; border-color: var(--border2); background: #F5F5F7; cursor: default; }
+    .tb-btn.primary  { background: var(--blue); color: white; border-color: var(--blue); }
+    .tb-btn.primary:hover:not(:disabled) { opacity: 0.85; background: var(--blue); }
 
-    main {
-      max-width: 800px;
-      margin: 0 auto;
+    .tb-sep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; }
+
+    .tb-spacer { flex: 1; }
+
+    #type-filter {
+      border: 1px solid #C7C7CC;
+      border-radius: 6px;
+      padding: 3px 8px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 13px;
+      min-width: 130px;
+    }
+
+    /* ================================================================
+       MAIN LAYOUT
+    ================================================================ */
+    #layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ================================================================
+       SIDEBAR
+    ================================================================ */
+    #sidebar {
+      width: 220px;
+      min-width: 160px;
+      max-width: 280px;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      flex-shrink: 0;
+      padding: 8px 0;
+      user-select: none;
+    }
+
+    .sidebar-section {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text3);
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      padding: 10px 14px 4px;
+    }
+
+    .scan-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      margin: 1px 6px;
+      cursor: pointer;
+      line-height: 1.3;
+    }
+    .scan-item:hover   { background: #E5E5EA; }
+    .scan-item.active  { background: var(--blue); color: white; }
+    .scan-item .scan-label { flex: 1; min-width: 0; }
+    .scan-item .scan-name  { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .scan-item .scan-sub   { font-size: 11px; color: var(--text3); }
+    .scan-item.active .scan-sub { color: rgba(255,255,255,0.75); }
+    .scan-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .scan-dot.done    { background: var(--green); }
+    .scan-dot.running { background: var(--orange); animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* ================================================================
+       CENTER PANEL
+    ================================================================ */
+    #center {
+      flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 16px;
-    }
-
-    .card {
-      background: var(--surface);
-      border-radius: var(--radius);
-      padding: 20px 24px;
-      border: 1px solid var(--border);
-    }
-
-    /* ---- Landing state ---- */
-    #landing {
-      text-align: center;
-      padding: 60px 24px;
-    }
-    #landing .icon { font-size: 56px; margin-bottom: 16px; }
-    #landing h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-    #landing p { color: var(--text3); font-size: 14px; line-height: 1.6; max-width: 360px; margin: 0 auto 28px; }
-    #landing .open-big {
-      background: var(--blue); color: white; border: none;
-      border-radius: 10px; padding: 12px 28px;
-      font-size: 16px; font-weight: 600; cursor: pointer;
-      transition: opacity 0.15s;
-    }
-    #landing .open-big:hover { opacity: 0.85; }
-    #browser-note {
-      margin-top: 20px;
-      font-size: 12px;
-      color: var(--text3);
-    }
-
-    /* ---- Scan selector ---- */
-    #scan-select-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    #scan-select-row label { font-size: 13px; color: var(--text3); font-weight: 500; }
-    #scan-select {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 5px 10px;
-      font-size: 14px;
-      background: var(--bg);
-      color: var(--text);
-      cursor: pointer;
-    }
-
-    /* ---- Progress section ---- */
-    .section-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text3);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 12px;
-    }
-
-    #scan-title {
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 14px;
-      color: var(--text2);
-    }
-
-    .progress-track {
-      background: var(--bg);
-      border-radius: 100px;
-      height: 10px;
       overflow: hidden;
-      margin-bottom: 10px;
     }
-    .progress-fill {
-      height: 100%;
-      border-radius: 100px;
-      background: var(--blue);
-      transition: width 0.5s ease;
-    }
-    .progress-fill.done { background: var(--green); }
 
-    .progress-labels {
-      display: flex;
-      justify-content: space-between;
-      font-size: 13px;
-      color: var(--text3);
-    }
-    #pct-label { font-weight: 700; font-size: 15px; color: var(--text); }
-
-    /* ---- Stats grid ---- */
-    .stats-grid {
+    /* Table header */
+    #table-head {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-top: 4px;
+      grid-template-columns: 32px 44px 68px 86px 76px 130px 86px;
+      background: #F2F2F7;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
     }
-    @media (max-width: 600px) {
-      .stats-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    .stat-box {
-      background: var(--bg);
-      border-radius: 10px;
-      padding: 12px 14px;
-    }
-    .stat-box .val {
-      font-size: 20px;
-      font-weight: 700;
-      line-height: 1.2;
-    }
-    .stat-box .lbl {
-      font-size: 11px;
-      color: var(--text3);
-      margin-top: 3px;
-    }
-    .stat-box.accent .val { color: var(--blue); }
-    .stat-box.green  .val { color: var(--green); }
-    .stat-box.orange .val { color: var(--orange); }
-
-    /* ---- Status badge ---- */
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
+    .th {
+      padding: 5px 8px;
       font-size: 12px;
       font-weight: 600;
-      padding: 3px 10px;
-      border-radius: 100px;
+      color: var(--text2);
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      border-right: 1px solid var(--border2);
+      user-select: none;
     }
-    .badge.scanning { background: #FFF3E0; color: var(--orange); }
-    .badge.done     { background: #E8F5E9; color: var(--green); }
+    .th:last-child { border-right: none; }
+    .th:hover { background: #E9E9EF; }
+    .th .sort-arrow { color: var(--text3); margin-left: 3px; }
 
-    .badge .dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: currentColor;
-    }
-    .badge.scanning .dot {
-      animation: pulse 1.2s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
+    /* Table body */
+    #table-scroll {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
 
-    /* ---- File types ---- */
-    .type-row {
+    .file-row {
+      display: grid;
+      grid-template-columns: 32px 44px 68px 86px 76px 130px 86px;
+      border-bottom: 1px solid #F4F4F8;
+      cursor: pointer;
+      align-items: center;
+    }
+    .file-row:nth-child(even) { background: #F9F9FB; }
+    .file-row:hover  { background: #EEF4FF; }
+    .file-row.selected { background: #D0E8FF; }
+
+    .td {
+      padding: 5px 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .td.right { text-align: right; }
+    .td.icon  { font-size: 16px; text-align: center; padding: 4px 0; }
+
+    .status-recovered { color: var(--green); font-weight: 500; }
+    .status-truncated { color: var(--orange); }
+
+    /* Pagination */
+    #pagination {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 7px 0;
-      border-bottom: 1px solid var(--bg);
-    }
-    .type-row:last-child { border-bottom: none; }
-    .type-icon { font-size: 18px; width: 24px; text-align: center; }
-    .type-name { flex: 1; font-size: 14px; font-weight: 500; }
-    .type-bar-wrap { flex: 2; background: var(--bg); border-radius: 100px; height: 6px; }
-    .type-bar { height: 6px; border-radius: 100px; background: var(--blue); }
-    .type-count { font-size: 13px; color: var(--text3); min-width: 40px; text-align: right; }
-
-    /* ---- Refresh indicator ---- */
-    #refresh-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      justify-content: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-top: 1px solid var(--border2);
+      background: #FAFAFA;
+      flex-shrink: 0;
       font-size: 12px;
       color: var(--text3);
     }
-    #last-updated { }
-    #refresh-countdown { }
-
-    /* ---- Error ---- */
-    #error-box {
-      background: #FFF0F0;
-      border: 1px solid #FFCDD2;
-      border-radius: var(--radius);
-      padding: 14px 18px;
-      font-size: 14px;
-      color: var(--red);
+    .page-btn {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 5px;
+      padding: 2px 8px;
+      cursor: pointer;
+      font-size: 12px;
     }
+    .page-btn:hover:not(:disabled) { background: var(--bg); }
+    .page-btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* Progress bar */
+    #progress-wrap {
+      height: 4px;
+      background: var(--border2);
+      flex-shrink: 0;
+      display: none;
+    }
+    #progress-fill {
+      height: 4px;
+      background: var(--blue);
+      transition: width 0.4s ease;
+    }
+    #progress-fill.done { background: var(--green); }
+
+    /* ================================================================
+       PREVIEW PANEL
+    ================================================================ */
+    #preview {
+      width: 220px;
+      min-width: 180px;
+      border-left: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    #preview-header {
+      padding: 10px 14px 6px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text3);
+      border-bottom: 1px solid var(--border2);
+      flex-shrink: 0;
+    }
+    #preview-img-wrap {
+      width: 160px;
+      height: 160px;
+      margin: 14px auto 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #FAFAFA;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 52px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    #preview-img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
+    #preview-icon { display: block; }
+    #preview-meta {
+      padding: 12px 14px;
+      font-size: 12px;
+      color: var(--text2);
+      line-height: 1.8;
+      overflow-y: auto;
+      flex: 1;
+    }
+    #preview-meta .meta-row { display: flex; gap: 6px; }
+    #preview-meta .meta-key { color: var(--text3); min-width: 56px; flex-shrink: 0; }
+    #preview-meta .meta-val { word-break: break-all; }
+    #preview-empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text3);
+      font-size: 12px;
+      text-align: center;
+      padding: 20px;
+    }
+
+    /* ================================================================
+       STATUS BAR
+    ================================================================ */
+    #statusbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 3px 12px;
+      background: #F2F2F7;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text2);
+      flex-shrink: 0;
+    }
+    #status-right { color: var(--text3); }
+
+    /* ================================================================
+       LANDING / EMPTY STATES
+    ================================================================ */
+    #landing {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      color: var(--text3);
+      text-align: center;
+      padding: 40px;
+    }
+    #landing .big-icon { font-size: 60px; }
+    #landing h2 { font-size: 18px; font-weight: 600; color: var(--text2); }
+    #landing p  { font-size: 13px; max-width: 320px; line-height: 1.6; }
+
+    #no-files {
+      flex: 1;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: var(--text3);
+      font-size: 13px;
+    }
+
+    /* ================================================================
+       MODAL (CLI command overlay)
+    ================================================================ */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 24px 28px;
+      max-width: 540px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    }
+    .modal h3 { font-size: 16px; margin-bottom: 8px; }
+    .modal p  { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 14px; }
+    .modal code {
+      display: block;
+      background: #1C1C1E;
+      color: #E5E5EA;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      word-break: break-all;
+    }
+    .modal-btns { display: flex; justify-content: flex-end; gap: 8px; }
 
     .hidden { display: none !important; }
   </style>
 </head>
 <body>
 
-<header>
-  <h1>File Recovery Monitor</h1>
-  <button id="open-btn" onclick="openDB()">Open DB</button>
-</header>
+<!-- TOOLBAR -->
+<div id="toolbar">
+  <button class="tb-btn primary" onclick="openDB()">Open DB…</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btn-open-source" onclick="openSource()" disabled>Open Source…</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btn-recover-sel" onclick="recoverSelected()" disabled>Recover Selected</button>
+  <button class="tb-btn" id="btn-recover-all" onclick="recoverAll()" disabled>Recover All</button>
+  <div class="tb-spacer"></div>
+  <select id="type-filter" onchange="applyFilter()" disabled>
+    <option value="">All Types</option>
+  </select>
+</div>
 
-<main>
-  <div id="error-box" class="hidden"></div>
+<!-- LAYOUT -->
+<div id="layout">
 
-  <!-- Landing -->
-  <div id="landing" class="card">
-    <div class="icon">💾</div>
-    <h2>Monitor your scan in real time</h2>
-    <p>Open your <code>recovery.db</code> file to watch the scan progress, see files as they're found, and track estimated completion time.</p>
-    <button class="open-big" onclick="openDB()">Open recovery.db</button>
-    <p id="browser-note">Requires Chrome or Edge · Uses File System Access API to read your local DB</p>
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div class="sidebar-section">Scans</div>
+    <div id="scans-list"></div>
   </div>
 
-  <!-- Dashboard (hidden until DB opened) -->
-  <div id="dashboard" class="hidden">
+  <!-- CENTER -->
+  <div id="center">
 
-    <!-- Scan picker -->
-    <div class="card" id="scan-select-card">
-      <div id="scan-select-row">
-        <label for="scan-select">Scan</label>
-        <select id="scan-select" onchange="selectScan(this.value)"></select>
-        <span id="status-badge"></span>
-      </div>
+    <!-- Landing -->
+    <div id="landing">
+      <div class="big-icon">💾</div>
+      <h2>File Recovery</h2>
+      <p>Open a <code>recovery.db</code> scan database to browse found files and recover them.</p>
+      <button class="tb-btn primary" style="padding:8px 22px;font-size:14px" onclick="openDB()">Open DB…</button>
+      <p style="font-size:11px;color:var(--text3);margin-top:4px">Requires Chrome or Edge</p>
     </div>
 
-    <!-- Progress -->
-    <div class="card">
-      <div class="section-label">Progress</div>
-      <div id="scan-title">—</div>
-      <div class="progress-track">
-        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
-      </div>
-      <div class="progress-labels">
-        <span id="bytes-label">—</span>
-        <span id="pct-label">0%</span>
-      </div>
-
-      <div class="stats-grid" style="margin-top:16px">
-        <div class="stat-box accent">
-          <div class="val" id="stat-files">—</div>
-          <div class="lbl">Files found</div>
-        </div>
-        <div class="stat-box">
-          <div class="val" id="stat-speed">—</div>
-          <div class="lbl">Scan speed</div>
-        </div>
-        <div class="stat-box orange">
-          <div class="val" id="stat-eta">—</div>
-          <div class="lbl">Time remaining</div>
-        </div>
-        <div class="stat-box green">
-          <div class="val" id="stat-elapsed">—</div>
-          <div class="lbl">Elapsed</div>
-        </div>
-      </div>
+    <!-- Table (hidden until DB open) -->
+    <div id="table-head" class="hidden">
+      <div class="th" onclick="sortBy('type')" style="grid-column:1/3">Type <span class="sort-arrow" id="sort-type"></span></div>
+      <div class="th" onclick="sortBy('file_type')">Kind <span class="sort-arrow" id="sort-file_type"></span></div>
+      <div class="th" onclick="sortBy('file_date')">Date <span class="sort-arrow" id="sort-file_date"></span></div>
+      <div class="th" onclick="sortBy('length')" style="text-align:right">Size <span class="sort-arrow" id="sort-length"></span></div>
+      <div class="th" onclick="sortBy('offset')" style="text-align:right">Offset <span class="sort-arrow" id="sort-offset"></span></div>
+      <div class="th" onclick="sortBy('status')">Status <span class="sort-arrow" id="sort-status"></span></div>
+    </div>
+    <div id="table-scroll" class="hidden">
+      <div id="table-body"></div>
+      <div id="no-files">No files found yet</div>
+    </div>
+    <div id="pagination" class="hidden">
+      <button class="page-btn" id="btn-prev" onclick="prevPage()">‹ Prev</button>
+      <span id="page-info"></span>
+      <button class="page-btn" id="btn-next" onclick="nextPage()">Next ›</button>
     </div>
 
-    <!-- File types -->
-    <div class="card" id="types-card">
-      <div class="section-label">Files Found by Type</div>
-      <div id="types-list"></div>
-    </div>
-
-    <!-- Refresh footer -->
-    <div id="refresh-row">
-      <span id="last-updated">Never updated</span>
-      <span id="refresh-countdown"></span>
+    <!-- Progress bar -->
+    <div id="progress-wrap">
+      <div id="progress-fill" style="width:0%"></div>
     </div>
 
   </div>
-</main>
+
+  <!-- PREVIEW -->
+  <div id="preview">
+    <div id="preview-header">Preview</div>
+    <div id="preview-empty">Select a file to preview</div>
+    <div id="preview-content" class="hidden">
+      <div id="preview-img-wrap">
+        <span id="preview-icon"></span>
+        <img id="preview-img" alt="preview">
+      </div>
+      <div id="preview-meta"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- STATUS BAR -->
+<div id="statusbar">
+  <span id="status-left">No database open</span>
+  <span id="status-right" id="status-right"></span>
+</div>
+
+<!-- MODAL -->
+<div id="modal" class="hidden">
+  <div class="modal-backdrop" onclick="closeModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modal-title"></h3>
+      <p id="modal-body"></p>
+      <code id="modal-code" class="hidden"></code>
+      <div class="modal-btns">
+        <button class="tb-btn" onclick="closeModal()">Close</button>
+        <button class="tb-btn" id="modal-copy-btn" onclick="copyModalCode()" class="hidden">Copy Command</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.js"
-  integrity="sha512-9DkBn5i4e5tpnkFhVvL+ydLKcXLa9YTzz7IWTxHGnHVjfSl3n25vw2VFjH1BQYX8sPGBBMfEXKXY7R8QXxaA=="
   crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-
 <script>
-  // ---- State ----
-  let fileHandle = null;
-  let SQL = null;
-  let currentScanId = null;
-  let pollInterval = null;
-  let countdown = 3;
-  let prevBytesScanned = null;
-  let prevBytesTime = null;
+'use strict';
 
-  const TYPE_ICONS = {
-    JPEG: '🖼', PNG: '🖼', GIF: '🖼', BMP: '🖼',
-    PDF: '📄', ZIP: '📦', WAV: '🎵',
-    AVI: '🎬', MP4: '🎬', MOV: '🎬',
-    SQLite: '🗄',
-  };
+// ============================================================
+// STATE
+// ============================================================
+const S = {
+  SQL: null,
+  dbHandle: null,
+  sourceHandle: null,
+  currentScanId: null,
+  scans: [],             // [{id, source_path, source_size, bytes_scanned, started_at, finished_at}]
+  allFiles: [],          // FoundFile objects for current scan
+  filtered: [],          // after type filter
+  sortCol: 'offset',
+  sortDir: 1,            // 1=asc, -1=desc
+  typeFilter: '',
+  selectedIds: new Set(),
+  page: 0,
+  PAGE_SIZE: 100,
+  pollTimer: null,
+  refreshCountdown: 0,
+};
 
-  // ---- Init sql.js ----
-  async function initSQL() {
-    if (SQL) return SQL;
-    SQL = await initSqlJs({
-      locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/${f}`
+const TYPE_ICONS = {
+  JPEG:'🖼', PNG:'🖼', GIF:'🖼', BMP:'🖼',
+  PDF:'📄', ZIP:'📦', WAV:'🎵',
+  AVI:'🎬', MP4:'🎬', MOV:'🎬',
+  SQLite:'🗄',
+};
+
+// ============================================================
+// SQL.JS INIT
+// ============================================================
+async function initSQL() {
+  if (S.SQL) return S.SQL;
+  S.SQL = await initSqlJs({
+    locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/${f}`
+  });
+  return S.SQL;
+}
+
+// ============================================================
+// OPEN DB
+// ============================================================
+async function openDB() {
+  if (!window.showOpenFilePicker) {
+    alert('File System Access API required. Please use Chrome or Edge.');
+    return;
+  }
+  let handle;
+  try {
+    [handle] = await window.showOpenFilePicker({
+      types: [{ description: 'SQLite Database', accept: { 'application/octet-stream': ['.db'] } }],
     });
-    return SQL;
+  } catch (e) { if (e.name !== 'AbortError') alert(e.message); return; }
+
+  await initSQL();
+  S.dbHandle = handle;
+
+  // Show table UI
+  document.getElementById('landing').classList.add('hidden');
+  document.getElementById('table-head').classList.remove('hidden');
+  document.getElementById('table-scroll').classList.remove('hidden');
+  document.getElementById('pagination').classList.remove('hidden');
+  document.getElementById('btn-open-source').disabled = false;
+
+  await refreshDB();
+  startPolling();
+}
+
+// ============================================================
+// OPEN SOURCE (for recovery)
+// ============================================================
+async function openSource() {
+  if (!window.showOpenFilePicker) return;
+  try {
+    [S.sourceHandle] = await window.showOpenFilePicker({ multiple: false });
+    setStatus('Source: ' + S.sourceHandle.name);
+  } catch (e) { if (e.name !== 'AbortError') alert(e.message); }
+}
+
+// ============================================================
+// READ & REFRESH
+// ============================================================
+async function refreshDB() {
+  if (!S.dbHandle || !S.SQL) return;
+  let db;
+  try {
+    const file = await S.dbHandle.getFile();
+    const buf  = await file.arrayBuffer();
+    db = new S.SQL.Database(new Uint8Array(buf));
+  } catch (e) { console.error(e); return; }
+
+  try {
+    loadScans(db);
+    if (S.currentScanId !== null) {
+      loadFiles(db, S.currentScanId);
+      updateProgress(db, S.currentScanId);
+    }
+  } finally { db.close(); }
+}
+
+function loadScans(db) {
+  const res = db.exec('SELECT id,source_path,source_size,bytes_scanned,started_at,finished_at FROM scans ORDER BY id DESC');
+  if (!res.length) return;
+  S.scans = res[0].values.map(([id,src,size,done,start,fin]) => ({id,src,size,done,start,fin}));
+
+  const list = document.getElementById('scans-list');
+  list.innerHTML = '';
+  S.scans.forEach(s => {
+    const pct = s.size ? Math.round(s.done/s.size*100) : 0;
+    const div = document.createElement('div');
+    div.className = 'scan-item' + (s.id === S.currentScanId ? ' active' : '');
+    div.onclick = () => selectScan(s.id);
+    div.innerHTML = `
+      <span class="scan-dot ${s.fin ? 'done' : 'running'}"></span>
+      <span class="scan-label">
+        <div class="scan-name">Scan ${s.id} — ${basename(s.src)}</div>
+        <div class="scan-sub">${s.fin ? 'Complete' : pct+'%  scanning…'}</div>
+      </span>`;
+    list.appendChild(div);
+  });
+
+  if (S.currentScanId === null && S.scans.length) {
+    selectScan(S.scans[0].id);
+  }
+}
+
+function selectScan(id) {
+  S.currentScanId = id;
+  S.selectedIds.clear();
+  S.page = 0;
+  S.typeFilter = '';
+  document.getElementById('type-filter').value = '';
+
+  // Highlight in sidebar
+  document.querySelectorAll('.scan-item').forEach(el => {
+    el.classList.toggle('active', parseInt(el.querySelector('.scan-name').textContent) === id ||
+      el.querySelector('.scan-name').textContent.startsWith('Scan ' + id + ' '));
+  });
+
+  refreshDB();
+}
+
+function loadFiles(db, scanId) {
+  const res = db.exec(
+    `SELECT id,file_type,extension,offset,length,truncated,file_date,recovered_path
+     FROM found_files WHERE scan_id=${scanId} ORDER BY offset`
+  );
+
+  S.allFiles = res.length ? res[0].values.map(([id,ft,ext,off,len,trunc,date,recov]) => ({
+    id, file_type:ft, extension:ext, offset:off, length:len,
+    truncated:!!trunc, file_date:date, recovered_path:recov
+  })) : [];
+
+  // Rebuild type filter
+  const types = [...new Set(S.allFiles.map(f => f.file_type))].sort();
+  const sel = document.getElementById('type-filter');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">All Types</option>';
+  types.forEach(t => { const o=document.createElement('option'); o.value=t; o.textContent=t; sel.appendChild(o); });
+  if (prev && types.includes(prev)) sel.value = prev;
+  sel.disabled = false;
+
+  applyFilter();
+
+  const scan = S.scans.find(s => s.id === scanId);
+  const src  = scan ? basename(scan.src) : '?';
+  setStatus(`Scan ${scanId}  ·  ${src}  ·  ${S.allFiles.length.toLocaleString()} files found`);
+
+  document.getElementById('btn-recover-all').disabled = S.allFiles.length === 0;
+}
+
+function updateProgress(db, scanId) {
+  const scan = S.scans.find(s => s.id === scanId);
+  if (!scan) return;
+  const pct = scan.size ? (scan.done / scan.size * 100) : 0;
+  const wrap = document.getElementById('progress-wrap');
+  const fill = document.getElementById('progress-fill');
+
+  if (scan.fin) {
+    wrap.style.display = 'none';
+    fill.className = 'progress-fill done';
+  } else {
+    wrap.style.display = 'block';
+    fill.className = 'progress-fill';
+    fill.style.width = pct.toFixed(1) + '%';
+  }
+}
+
+// ============================================================
+// FILTER & SORT
+// ============================================================
+function applyFilter() {
+  S.typeFilter = document.getElementById('type-filter').value;
+  S.filtered = S.typeFilter
+    ? S.allFiles.filter(f => f.file_type === S.typeFilter)
+    : [...S.allFiles];
+  S.page = 0;
+  sortAndRender();
+}
+
+function sortBy(col) {
+  if (S.sortCol === col) S.sortDir *= -1;
+  else { S.sortCol = col; S.sortDir = 1; }
+  sortAndRender();
+}
+
+function sortAndRender() {
+  const col = S.sortCol;
+  const dir = S.sortDir;
+  S.filtered.sort((a, b) => {
+    let av = a[col] ?? '', bv = b[col] ?? '';
+    if (typeof av === 'number' || typeof bv === 'number') return dir * ((av||0) - (bv||0));
+    return dir * String(av).localeCompare(String(bv));
+  });
+  // Update sort arrows
+  ['type','file_type','file_date','length','offset','status'].forEach(c => {
+    const el = document.getElementById('sort-'+c);
+    if (el) el.textContent = c === col ? (dir===1 ? ' ↑' : ' ↓') : '';
+  });
+  renderPage();
+}
+
+// ============================================================
+// RENDER TABLE
+// ============================================================
+const PAGE_SIZE = 100;
+
+function renderPage() {
+  const start = S.page * PAGE_SIZE;
+  const end   = Math.min(start + PAGE_SIZE, S.filtered.length);
+  const rows  = S.filtered.slice(start, end);
+
+  const body = document.getElementById('table-body');
+  const noFiles = document.getElementById('no-files');
+
+  if (!rows.length && S.allFiles.length === 0) {
+    body.innerHTML = '';
+    noFiles.style.display = 'flex';
+  } else {
+    noFiles.style.display = 'none';
+    body.innerHTML = rows.map(f => {
+      const icon   = TYPE_ICONS[f.file_type] || '📁';
+      const ext    = f.extension.replace(/^\./, '').toUpperCase();
+      const date   = fmtDate(f.file_date);
+      const size   = fmtSize(f.length);
+      const offset = f.offset.toLocaleString();
+      const status = f.recovered_path ? '<span class="status-recovered">Recovered</span>'
+                   : f.truncated       ? '<span class="status-truncated">Truncated</span>'
+                   : '';
+      const sel = S.selectedIds.has(f.id) ? ' selected' : '';
+      return `<div class="file-row${sel}" data-id="${f.id}" onclick="rowClick(event,${f.id})">
+        <div class="td icon">${icon}</div>
+        <div class="td">${ext}</div>
+        <div class="td">${f.file_type}</div>
+        <div class="td">${date}</div>
+        <div class="td right">${size}</div>
+        <div class="td right">${offset}</div>
+        <div class="td">${status}</div>
+      </div>`;
+    }).join('');
   }
 
-  // ---- Open DB via File System Access API ----
-  async function openDB() {
-    if (!window.showOpenFilePicker) {
-      showError('Your browser does not support the File System Access API. Please use Chrome or Edge.');
-      return;
-    }
-    try {
-      [fileHandle] = await window.showOpenFilePicker({
-        types: [{ description: 'SQLite Database', accept: { 'application/octet-stream': ['.db'] } }],
-        multiple: false,
-      });
-    } catch (e) {
-      if (e.name !== 'AbortError') showError('Could not open file: ' + e.message);
-      return;
-    }
+  // Pagination
+  const total = S.filtered.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  document.getElementById('page-info').textContent =
+    total ? `${start+1}–${end} of ${total.toLocaleString()}` : '0 files';
+  document.getElementById('btn-prev').disabled = S.page === 0;
+  document.getElementById('btn-next').disabled = S.page >= pages - 1;
 
-    await initSQL();
-    clearError();
-    document.getElementById('landing').classList.add('hidden');
-    document.getElementById('dashboard').classList.remove('hidden');
+  updateSelectionUI();
+}
 
-    await loadDB();
-    startPolling();
-  }
+function prevPage() { if (S.page > 0) { S.page--; renderPage(); } }
+function nextPage() {
+  if ((S.page+1)*PAGE_SIZE < S.filtered.length) { S.page++; renderPage(); }
+}
 
-  // ---- Read & query the DB ----
-  async function loadDB() {
-    if (!fileHandle || !SQL) return;
-    let db;
-    try {
-      const file = await fileHandle.getFile();
-      const buf = await file.arrayBuffer();
-      db = new SQL.Database(new Uint8Array(buf));
-    } catch (e) {
-      showError('Failed to read database: ' + e.message);
-      return;
-    }
-
-    try {
-      populateScans(db);
-      if (currentScanId !== null) {
-        updateDashboard(db, currentScanId);
-      }
-    } finally {
-      db.close();
-    }
-
-    const now = new Date();
-    document.getElementById('last-updated').textContent =
-      'Updated ' + now.toLocaleTimeString();
-    countdown = 3;
-  }
-
-  // ---- Populate scan selector ----
-  function populateScans(db) {
-    const scans = db.exec('SELECT id, source_path, source_size, bytes_scanned, started_at, finished_at FROM scans ORDER BY id DESC');
-    if (!scans.length) return;
-
-    const rows = scans[0].values;
-    const sel = document.getElementById('scan-select');
-    const prevVal = sel.value;
-
-    sel.innerHTML = '';
-    rows.forEach(([id, src, size, done, , fin]) => {
-      const pct = size ? Math.round(done / size * 100) : 0;
-      const label = fin
-        ? `Scan ${id} — ${basename(src)} ✓`
-        : `Scan ${id} — ${basename(src)} (${pct}%)`;
-      const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = label;
-      sel.appendChild(opt);
-    });
-
-    // Restore or auto-select
-    if (prevVal && [...sel.options].some(o => o.value == prevVal)) {
-      sel.value = prevVal;
+// ============================================================
+// ROW SELECTION
+// ============================================================
+function rowClick(e, id) {
+  if (e.shiftKey) {
+    // range select
+    const ids  = S.filtered.map(f => f.id);
+    const last = [...S.selectedIds].pop();
+    if (last !== undefined) {
+      const a = ids.indexOf(last), b = ids.indexOf(id);
+      const [lo, hi] = a < b ? [a,b] : [b,a];
+      ids.slice(lo, hi+1).forEach(x => S.selectedIds.add(x));
     } else {
-      sel.value = rows[0][0]; // most recent
+      S.selectedIds.add(id);
     }
+  } else if (e.metaKey || e.ctrlKey) {
+    if (S.selectedIds.has(id)) S.selectedIds.delete(id);
+    else S.selectedIds.add(id);
+  } else {
+    S.selectedIds.clear();
+    S.selectedIds.add(id);
+  }
+  renderPage();
+  showPreview(id);
+}
 
-    if (currentScanId === null) {
-      currentScanId = parseInt(sel.value);
-    }
+function updateSelectionUI() {
+  const n = S.selectedIds.size;
+  document.getElementById('btn-recover-sel').disabled = n === 0;
+  document.getElementById('status-right').textContent = n ? `${n} selected` : '';
+
+  document.querySelectorAll('.file-row').forEach(row => {
+    const id = parseInt(row.dataset.id);
+    row.classList.toggle('selected', S.selectedIds.has(id));
+  });
+}
+
+// ============================================================
+// PREVIEW
+// ============================================================
+function showPreview(id) {
+  const f = S.allFiles.find(x => x.id === id);
+  if (!f) return;
+
+  document.getElementById('preview-empty').classList.add('hidden');
+  document.getElementById('preview-content').classList.remove('hidden');
+
+  const icon = TYPE_ICONS[f.file_type] || '📁';
+  document.getElementById('preview-icon').textContent = icon;
+
+  // Clear old image
+  const img = document.getElementById('preview-img');
+  img.style.display = 'none';
+  img.src = '';
+  document.getElementById('preview-icon').style.display = 'block';
+
+  // Try to show image preview if source is open and it's an image
+  const imgTypes = new Set(['JPEG','PNG','GIF','BMP']);
+  if (S.sourceHandle && imgTypes.has(f.file_type)) {
+    loadPreviewImage(f);
   }
 
-  function selectScan(id) {
-    currentScanId = parseInt(id);
-    prevBytesScanned = null;
-    prevBytesTime = null;
-    loadDB();
+  const status = f.recovered_path ? 'Recovered'
+               : f.truncated       ? 'Truncated'
+               : 'Found';
+  const rows = [
+    ['Type',   f.file_type],
+    ['Ext',    '.' + f.extension],
+    ['Size',   fmtSize(f.length)],
+    ['Date',   fmtDate(f.file_date) || '—'],
+    ['Offset', f.offset.toLocaleString()],
+    ['Status', status],
+  ];
+  if (f.recovered_path) rows.push(['Saved', f.recovered_path]);
+
+  document.getElementById('preview-meta').innerHTML = rows.map(([k,v]) =>
+    `<div class="meta-row"><span class="meta-key">${k}</span><span class="meta-val">${v}</span></div>`
+  ).join('');
+}
+
+async function loadPreviewImage(f) {
+  try {
+    const file   = await S.sourceHandle.getFile();
+    const slice  = file.slice(f.offset, f.offset + Math.min(f.length, 512*1024));
+    const mime   = f.file_type === 'JPEG' ? 'image/jpeg'
+                 : f.file_type === 'PNG'  ? 'image/png'
+                 : f.file_type === 'GIF'  ? 'image/gif'
+                 : 'image/bmp';
+    const blob   = new Blob([await slice.arrayBuffer()], { type: mime });
+    const url    = URL.createObjectURL(blob);
+    const img    = document.getElementById('preview-img');
+    img.onload   = () => {
+      document.getElementById('preview-icon').style.display = 'none';
+      img.style.display = 'block';
+    };
+    img.src = url;
+  } catch (e) { /* preview unavailable */ }
+}
+
+// ============================================================
+// RECOVERY
+// ============================================================
+async function recoverSelected() {
+  const files = S.allFiles.filter(f => S.selectedIds.has(f.id));
+  await doRecover(files);
+}
+
+async function recoverAll() {
+  await doRecover(S.filtered);
+}
+
+async function doRecover(files) {
+  if (!files.length) return;
+
+  const scan = S.scans.find(s => s.id === S.currentScanId);
+  if (!scan) return;
+
+  // If source is a raw device path (starts with /dev/) or source not open, show CLI command
+  const isDevice = scan.src.startsWith('/dev/');
+  if (!S.sourceHandle && isDevice) {
+    showCLIRecovery(files, scan.src);
+    return;
   }
 
-  // ---- Update dashboard for a scan ----
-  function updateDashboard(db, scanId) {
-    const scanRows = db.exec(
-      `SELECT source_path, source_size, bytes_scanned, started_at, updated_at, finished_at
-       FROM scans WHERE id = ${scanId}`
+  if (!S.sourceHandle) {
+    const proceed = confirm(
+      'No source file is open.\n\n' +
+      'Click OK to open the source file/image, or Cancel to see the CLI command.'
     );
-    if (!scanRows.length || !scanRows[0].values.length) return;
-
-    const [src, size, done, startedAt, updatedAt, finishedAt] = scanRows[0].values[0];
-    const pct = size ? (done / size * 100) : 0;
-    const isDone = !!finishedAt;
-
-    // Title
-    document.getElementById('scan-title').textContent =
-      `Scan ${scanId} — ${src}`;
-
-    // Progress bar
-    const fill = document.getElementById('progress-fill');
-    fill.style.width = Math.min(pct, 100).toFixed(1) + '%';
-    fill.className = 'progress-fill' + (isDone ? ' done' : '');
-
-    document.getElementById('pct-label').textContent = pct.toFixed(1) + '%';
-    document.getElementById('bytes-label').textContent =
-      fmtSize(done) + ' / ' + fmtSize(size);
-
-    // Status badge
-    const badge = document.getElementById('status-badge');
-    badge.innerHTML = isDone
-      ? '<span class="badge done"><span class="dot"></span>Complete</span>'
-      : '<span class="badge scanning"><span class="dot"></span>Scanning…</span>';
-
-    // Files found
-    const fileRows = db.exec(
-      `SELECT COUNT(*) FROM found_files WHERE scan_id = ${scanId}`
-    );
-    const fileCount = fileRows.length ? fileRows[0].values[0][0] : 0;
-    document.getElementById('stat-files').textContent = fileCount.toLocaleString();
-
-    // Speed & ETA
-    const now = Date.now() / 1000;
-    let speedStr = '—';
-    let etaStr = isDone ? 'Done' : '—';
-
-    if (!isDone && prevBytesScanned !== null && prevBytesTime !== null) {
-      const deltaDone = done - prevBytesScanned;
-      const deltaTime = now - prevBytesTime;
-      if (deltaTime > 0 && deltaDone > 0) {
-        const speed = deltaDone / deltaTime;
-        speedStr = fmtSize(Math.round(speed)) + '/s';
-        const remaining = size - done;
-        if (remaining > 0) {
-          etaStr = fmtDuration(remaining / speed);
-        }
-      }
-    }
-    prevBytesScanned = done;
-    prevBytesTime = now;
-
-    document.getElementById('stat-speed').textContent = speedStr;
-    document.getElementById('stat-eta').textContent = etaStr;
-
-    // Elapsed
-    const elapsed = (isDone ? finishedAt : now) - startedAt;
-    document.getElementById('stat-elapsed').textContent = fmtDuration(elapsed);
-
-    // File type breakdown
-    const typeRows = db.exec(
-      `SELECT file_type, COUNT(*) as n FROM found_files
-       WHERE scan_id = ${scanId} GROUP BY file_type ORDER BY n DESC`
-    );
-    const typeList = document.getElementById('types-list');
-    if (typeRows.length && typeRows[0].values.length) {
-      const types = typeRows[0].values;
-      const max = types[0][1];
-      typeList.innerHTML = types.map(([type, count]) => `
-        <div class="type-row">
-          <span class="type-icon">${TYPE_ICONS[type] || '📁'}</span>
-          <span class="type-name">${type}</span>
-          <div class="type-bar-wrap">
-            <div class="type-bar" style="width:${(count / max * 100).toFixed(1)}%"></div>
-          </div>
-          <span class="type-count">${count.toLocaleString()}</span>
-        </div>`).join('');
-      document.getElementById('types-card').classList.remove('hidden');
+    if (proceed) {
+      await openSource();
+      if (!S.sourceHandle) return;
     } else {
-      typeList.innerHTML = '<p style="color:var(--text3);font-size:14px">No files found yet</p>';
-    }
-
-    // Stop polling when done
-    if (isDone && pollInterval) {
-      clearInterval(pollInterval);
-      pollInterval = null;
-      document.getElementById('refresh-countdown').textContent = '';
+      showCLIRecovery(files, scan.src);
+      return;
     }
   }
 
-  // ---- Polling ----
-  function startPolling() {
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(async () => {
-      countdown--;
-      document.getElementById('refresh-countdown').textContent =
-        countdown > 0 ? `Refreshing in ${countdown}s…` : 'Refreshing…';
-      if (countdown <= 0) {
-        countdown = 3;
-        await loadDB();
-      }
-    }, 1000);
+  // Pick destination folder
+  let destDir;
+  try {
+    destDir = await window.showDirectoryPicker({ mode: 'readwrite' });
+  } catch (e) { if (e.name !== 'AbortError') alert(e.message); return; }
+
+  const sourceFile = await S.sourceHandle.getFile();
+  let done = 0;
+  const total = files.length;
+  document.getElementById('progress-wrap').style.display = 'block';
+  document.getElementById('progress-fill').className = 'progress-fill';
+
+  for (const f of files) {
+    try {
+      const bytes = await readSlice(sourceFile, f.offset, f.length);
+      const name  = `${f.file_type.toLowerCase()}_${String(f.offset).padStart(12,'0')}.${f.extension}`;
+      const fh    = await destDir.getFileHandle(name, { create: true });
+      const w     = await fh.createWritable();
+      await w.write(bytes);
+      await w.close();
+      done++;
+      const pct = Math.round(done/total*100);
+      document.getElementById('progress-fill').style.width = pct + '%';
+      setStatus(`Recovering… ${done}/${total}: ${name}`);
+    } catch (e) {
+      console.error('Recovery failed for', f.id, e);
+    }
   }
 
-  // ---- Helpers ----
-  function basename(path) {
-    return path ? path.replace(/^.*[/\\]/, '') : path;
-  }
+  document.getElementById('progress-wrap').style.display = 'none';
+  setStatus(`Recovered ${done.toLocaleString()} files`);
+  alert(`Recovered ${done} of ${total} files.`);
+}
 
-  function fmtSize(n) {
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let i = 0;
-    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-    return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + units[i];
-  }
+async function readSlice(file, offset, length) {
+  const slice = file.slice(offset, offset + length);
+  return new Uint8Array(await slice.arrayBuffer());
+}
 
-  function fmtDuration(secs) {
-    if (!isFinite(secs) || secs < 0) return '—';
-    secs = Math.round(secs);
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    const s = secs % 60;
-    if (h > 0) return `${h}h ${m}m`;
-    if (m > 0) return `${m}m ${s}s`;
-    return `${s}s`;
-  }
+function showCLIRecovery(files, srcPath) {
+  const ids = files.map(f => f.id).join(',');
+  const cmd = files.length === S.allFiles.length
+    ? `filerecovery recover ${S.currentScanId} --db=/Users/dannyleblanc/recovery.db --dest=~/recovered`
+    : `filerecovery recover ${S.currentScanId} --ids=${ids} --db=/Users/dannyleblanc/recovery.db --dest=~/recovered`;
 
-  function showError(msg) {
-    const box = document.getElementById('error-box');
-    box.textContent = msg;
-    box.classList.remove('hidden');
-  }
+  showModal(
+    'Recover via Terminal',
+    `Source is a raw device (${srcPath}) — browsers can't read raw disks.\nRun this command in your terminal:`,
+    cmd
+  );
+}
 
-  function clearError() {
-    document.getElementById('error-box').classList.add('hidden');
+// ============================================================
+// POLLING
+// ============================================================
+function startPolling() {
+  if (S.pollTimer) clearInterval(S.pollTimer);
+  S.pollTimer = setInterval(async () => {
+    const scan = S.scans.find(s => s.id === S.currentScanId);
+    if (scan && scan.fin) { clearInterval(S.pollTimer); S.pollTimer = null; return; }
+    await refreshDB();
+  }, 3000);
+}
+
+// ============================================================
+// MODAL
+// ============================================================
+function showModal(title, body, code) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').textContent  = body;
+  const codeEl = document.getElementById('modal-code');
+  const copyBtn = document.getElementById('modal-copy-btn');
+  if (code) {
+    codeEl.textContent = code;
+    codeEl.classList.remove('hidden');
+    copyBtn.classList.remove('hidden');
+  } else {
+    codeEl.classList.add('hidden');
+    copyBtn.classList.add('hidden');
   }
+  document.getElementById('modal').classList.remove('hidden');
+}
+function closeModal()  { document.getElementById('modal').classList.add('hidden'); }
+function copyModalCode() {
+  navigator.clipboard.writeText(document.getElementById('modal-code').textContent);
+  document.getElementById('modal-copy-btn').textContent = 'Copied!';
+  setTimeout(() => { document.getElementById('modal-copy-btn').textContent = 'Copy Command'; }, 2000);
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+function setStatus(msg) {
+  document.getElementById('status-left').textContent = msg;
+}
+function basename(p) { return p ? p.replace(/^.*[/\\]/, '') : p; }
+function fmtSize(n) {
+  const u = ['B','KB','MB','GB','TB'];
+  let i = 0;
+  while (n >= 1024 && i < u.length-1) { n /= 1024; i++; }
+  return (i===0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + u[i];
+}
+function fmtDate(ts) {
+  if (!ts) return '';
+  try { return new Date(ts*1000).toISOString().slice(0,10); } catch { return ''; }
+}
 </script>
 
 </body>
