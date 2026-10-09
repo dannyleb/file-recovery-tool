@@ -41,6 +41,11 @@ class Source:
         self.path = path
         self.size = get_size(path)
         self._fh = open(path, "rb", buffering=0)
+        # Single-slot read cache: stores the last large read so that clusters
+        # of nearby extent lookups (e.g. dozens of JPEGs in the same region)
+        # hit memory instead of issuing repeated disk reads.
+        self._cache_offset: int = -1
+        self._cache_data: bytes = b""
 
     # macOS raw devices reject single read() calls larger than ~8 MB (EINVAL).
     _MAX_READ = 8 * 1024 * 1024
@@ -49,6 +54,13 @@ class Source:
         if offset >= self.size or length <= 0:
             return b""
         length = min(length, self.size - offset)
+
+        # Serve from cache if the requested range is fully covered.
+        c0, cd = self._cache_offset, self._cache_data
+        if c0 >= 0 and offset >= c0 and offset + length <= c0 + len(cd):
+            start = offset - c0
+            return cd[start: start + length]
+
         # Raw devices on macOS require sector-aligned reads.
         sector = 512
         aligned_offset = (offset // sector) * sector
@@ -73,7 +85,14 @@ class Source:
             remaining -= len(data)
 
         raw = b"".join(chunks)
-        return raw[pad: pad + length]
+        result = raw[pad: pad + length]
+
+        # Cache reads larger than 1 MB — these are the expensive extent lookups.
+        if length > 1024 * 1024:
+            self._cache_offset = offset
+            self._cache_data   = result
+
+        return result
 
     def close(self):
         self._fh.close()
