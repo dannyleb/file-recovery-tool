@@ -148,7 +148,7 @@
     /* Table header */
     #table-head {
       display: grid;
-      grid-template-columns: 32px 44px 68px 86px 76px 130px 86px;
+      grid-template-columns: 32px 44px 68px 86px 76px 1fr 130px 86px;
       background: #F2F2F7;
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
@@ -177,7 +177,7 @@
 
     .file-row {
       display: grid;
-      grid-template-columns: 32px 44px 68px 86px 76px 130px 86px;
+      grid-template-columns: 32px 44px 68px 86px 76px 1fr 130px 86px;
       border-bottom: 1px solid #F4F4F8;
       cursor: pointer;
       align-items: center;
@@ -482,6 +482,7 @@
       <div class="th" onclick="sortBy('file_type')">Kind <span class="sort-arrow" id="sort-file_type"></span></div>
       <div class="th" onclick="sortBy('file_date')">Date <span class="sort-arrow" id="sort-file_date"></span></div>
       <div class="th" onclick="sortBy('length')" style="text-align:right">Size <span class="sort-arrow" id="sort-length"></span></div>
+      <div class="th" onclick="sortBy('name')">Name <span class="sort-arrow" id="sort-name"></span></div>
       <div class="th" onclick="sortBy('offset')" style="text-align:right">Offset <span class="sort-arrow" id="sort-offset"></span></div>
       <div class="th" onclick="sortBy('status')">Status <span class="sort-arrow" id="sort-status"></span></div>
     </div>
@@ -766,7 +767,8 @@ function loadFiles(db, scanId) {
 
   S.allFiles = res.length ? res[0].values.map(([id,ft,ext,off,len,trunc,date,recov]) => ({
     id, file_type:ft, extension:ext, offset:off, length:len,
-    truncated:!!trunc, file_date:date, recovered_path:recov
+    truncated:!!trunc, file_date:date, recovered_path:recov,
+    name: recov ? recov.replace(/^.*[/\\]/, '') : `${ft.toLowerCase()}_${String(off).padStart(12,'0')}.${ext}`,
   })) : [];
 
   // Rebuild type filter
@@ -832,7 +834,7 @@ function sortAndRender() {
     return dir * String(av).localeCompare(String(bv));
   });
   // Update sort arrows
-  ['type','file_type','file_date','length','offset','status'].forEach(c => {
+  ['type','file_type','file_date','length','name','offset','status'].forEach(c => {
     const el = document.getElementById('sort-'+c);
     if (el) el.textContent = c === col ? (dir===1 ? ' ↑' : ' ↓') : '';
   });
@@ -862,6 +864,7 @@ function renderPage() {
       const ext    = f.extension.replace(/^\./, '').toUpperCase();
       const date   = fmtDate(f.file_date);
       const size   = fmtSize(f.length);
+      const name   = f.recovered_path ? f.recovered_path.replace(/^.*[/\\]/, '') : `${f.file_type.toLowerCase()}_${String(f.offset).padStart(12,'0')}.${f.extension}`;
       const offset = f.offset.toLocaleString();
       const status = f.recovered_path ? '<span class="status-recovered">Recovered</span>'
                    : f.truncated       ? '<span class="status-truncated">Truncated</span>'
@@ -873,6 +876,7 @@ function renderPage() {
         <div class="td">${f.file_type}</div>
         <div class="td">${date}</div>
         <div class="td right">${size}</div>
+        <div class="td" style="color:var(--text3);font-size:11px">${name}</div>
         <div class="td right">${offset}</div>
         <div class="td">${status}</div>
       </div>`;
