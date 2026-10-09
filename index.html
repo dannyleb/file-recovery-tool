@@ -688,7 +688,9 @@ function loadScans(db) {
   });
 
   if (S.currentScanId === null && S.scans.length) {
-    selectScan(S.scans[0].id);
+    // Prefer the most recently updated in-progress scan, else most recent overall
+    const running = S.scans.filter(s => !s.fin).sort((a,b) => b.updatedAt - a.updatedAt);
+    selectScan(running.length ? running[0].id : S.scans[0].id);
   }
 }
 
