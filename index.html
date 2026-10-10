@@ -452,6 +452,7 @@
   <div class="tb-spacer"></div>
   <button class="tb-btn" id="btn-previews-only" onclick="togglePreviewsOnly()" disabled title="Show only files with valid image previews">Previews Only</button>
   <button class="tb-btn" id="btn-has-date" onclick="toggleHasDate()" disabled title="Show only files with embedded date metadata">Has Date</button>
+  <button class="tb-btn" id="btn-hide-truncated" onclick="toggleHideTruncated()" disabled title="Hide files where the end marker was not found (likely broken)">Hide Truncated</button>
   <select id="type-filter" onchange="applyFilter()" disabled>
     <option value="">All Types</option>
   </select>
@@ -581,6 +582,7 @@ const S = {
   validPreviewIds: new Set(),
   validPreviewsLoaded: false,
   hasDateOnly: false,
+  hideTruncated: false,
   selectedIds: new Set(),
   page: 0,
   PAGE_SIZE: 100,
@@ -758,12 +760,15 @@ function selectScan(id) {
   S.validPreviewIds = new Set();
   S.validPreviewsLoaded = false;
   S.hasDateOnly = false;
+  S.hideTruncated = false;
   document.getElementById('type-filter').value = '';
   const pb = document.getElementById('btn-previews-only');
   pb.textContent = 'Previews Only';
   pb.style.background = pb.style.color = pb.style.borderColor = '';
   const hb = document.getElementById('btn-has-date');
   hb.style.background = hb.style.color = hb.style.borderColor = '';
+  const htb = document.getElementById('btn-hide-truncated');
+  htb.style.background = htb.style.color = htb.style.borderColor = '';
 
   // Highlight in sidebar
   document.querySelectorAll('.scan-item').forEach(el => {
@@ -804,6 +809,7 @@ function loadFiles(db, scanId) {
   document.getElementById('btn-recover-all').disabled = S.allFiles.length === 0;
   document.getElementById('btn-previews-only').disabled = !S.serverUrl;
   document.getElementById('btn-has-date').disabled = S.allFiles.length === 0;
+  document.getElementById('btn-hide-truncated').disabled = S.allFiles.length === 0;
   loadErrors(db, scanId);
 }
 
@@ -833,10 +839,20 @@ function applyFilter(resetPage = true) {
     if (S.typeFilter && f.file_type !== S.typeFilter) return false;
     if (S.previewsOnly && !S.validPreviewIds.has(f.id)) return false;
     if (S.hasDateOnly && !f.file_date) return false;
+    if (S.hideTruncated && f.truncated) return false;
     return true;
   });
   if (resetPage) S.page = 0;
   sortAndRender();
+}
+
+function toggleHideTruncated() {
+  S.hideTruncated = !S.hideTruncated;
+  const btn = document.getElementById('btn-hide-truncated');
+  btn.style.background  = S.hideTruncated ? 'var(--blue)' : '';
+  btn.style.color       = S.hideTruncated ? 'white' : '';
+  btn.style.borderColor = S.hideTruncated ? 'var(--blue)' : '';
+  applyFilter();
 }
 
 function toggleHasDate() {
