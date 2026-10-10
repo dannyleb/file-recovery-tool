@@ -451,6 +451,7 @@
   <button class="tb-btn" id="btn-recover-all" onclick="recoverAll()" disabled>Recover All</button>
   <div class="tb-spacer"></div>
   <button class="tb-btn" id="btn-previews-only" onclick="togglePreviewsOnly()" disabled title="Show only files with valid image previews">Previews Only</button>
+  <button class="tb-btn" id="btn-has-date" onclick="toggleHasDate()" disabled title="Show only files with embedded date metadata">Has Date</button>
   <select id="type-filter" onchange="applyFilter()" disabled>
     <option value="">All Types</option>
   </select>
@@ -579,6 +580,7 @@ const S = {
   previewsOnly: false,
   validPreviewIds: new Set(),
   validPreviewsLoaded: false,
+  hasDateOnly: false,
   selectedIds: new Set(),
   page: 0,
   PAGE_SIZE: 100,
@@ -755,10 +757,13 @@ function selectScan(id) {
   S.previewsOnly = false;
   S.validPreviewIds = new Set();
   S.validPreviewsLoaded = false;
+  S.hasDateOnly = false;
   document.getElementById('type-filter').value = '';
   const pb = document.getElementById('btn-previews-only');
   pb.textContent = 'Previews Only';
   pb.style.background = pb.style.color = pb.style.borderColor = '';
+  const hb = document.getElementById('btn-has-date');
+  hb.style.background = hb.style.color = hb.style.borderColor = '';
 
   // Highlight in sidebar
   document.querySelectorAll('.scan-item').forEach(el => {
@@ -798,6 +803,7 @@ function loadFiles(db, scanId) {
 
   document.getElementById('btn-recover-all').disabled = S.allFiles.length === 0;
   document.getElementById('btn-previews-only').disabled = !S.serverUrl;
+  document.getElementById('btn-has-date').disabled = S.allFiles.length === 0;
   loadErrors(db, scanId);
 }
 
@@ -826,10 +832,20 @@ function applyFilter(resetPage = true) {
   S.filtered = S.allFiles.filter(f => {
     if (S.typeFilter && f.file_type !== S.typeFilter) return false;
     if (S.previewsOnly && !S.validPreviewIds.has(f.id)) return false;
+    if (S.hasDateOnly && !f.file_date) return false;
     return true;
   });
   if (resetPage) S.page = 0;
   sortAndRender();
+}
+
+function toggleHasDate() {
+  S.hasDateOnly = !S.hasDateOnly;
+  const btn = document.getElementById('btn-has-date');
+  btn.style.background  = S.hasDateOnly ? 'var(--blue)' : '';
+  btn.style.color       = S.hasDateOnly ? 'white' : '';
+  btn.style.borderColor = S.hasDateOnly ? 'var(--blue)' : '';
+  applyFilter();
 }
 
 async function togglePreviewsOnly() {
