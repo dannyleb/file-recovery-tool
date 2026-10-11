@@ -12,18 +12,72 @@ then work out exactly how long that file is by parsing the format's own
 internal structure (or, when that's not possible, by capping at a sane
 maximum size).
 
-## How it works
+## Architecture
 
-1. **Scan** — reads the device (or a disk image) from start to end, looking
-   for file headers. For every match, it figures out the file's length and
-   records `(type, offset, length)` in a small SQLite database. Nothing is
-   written to the source drive during a scan; it's opened read-only throughout.
-2. **List** — browse what the scan found before committing to anything.
-3. **Recover** — copies the exact byte range for the files you choose out to
-   a destination of your choice.
+```
+filerecovery/
+  signatures.py   Per-type header + extent-parsing logic (the carving rules)
+  source.py       Read-only, sector-aligned access to a device/image, with caching
+  scanner.py      Sequential scan loop: finds headers, computes extents, writes to db
+  db.py           SQLite storage for scans, found files, and errors
+  recover.py      Copies a found file's byte range to a destination, with the
+                  same-disk safety check
+  disks.py        Best-effort disk listing (macOS/Linux) for `list-disks`
+  metadata.py     Extracts embedded dates (EXIF/PNG/MP4) and thumbnails from
+                  carved bytes — exception-safe, falls back to None
+  server.py       Local HTTP API (stdlib only) that backs the web GUI
+  gui.py          Legacy PyQt6 desktop GUI (superseded by the web GUI below;
+                  still installable but not actively developed)
+cli.py             argparse entry point: list-disks / scan / list / recover / serve
+index.html         Web GUI, served from GitHub Pages and from the local server
+```
 
-Supported types: JPEG, PNG, GIF, PDF, ZIP (and anything ZIP-based — docx,
-xlsx, pptx, jar, apk), BMP, WAV, AVI, SQLite databases, and MP4/MOV.
+**Data flow:** `scan` reads the source sequentially in 16 MB chunks, searches
+each chunk for every signature's header bytes, and for each match calls that
+signature's `extent_fn` to work out the exact length (parsing the format's
+own internal structure where possible, or searching for a footer / capping at
+a max size otherwise). Every find is written to SQLite immediately — nothing
+is buffered in memory and progress is checkpointed every 2 seconds, so a scan
+of a multi-terabyte drive can be interrupted and resumed. `recover` later
+reads just the `(offset, length)` byte range back out and writes it to a
+destination file.
+
+### Supported types & how each one is bounded
+
+| Type | Header | Extent method | Exact? |
+|---|---|---|---|
+| JPEG | `FF D8 FF` | search for `FF D9` end marker | best-effort |
+| PNG | `89 50 4E 47 0D 0A 1A 0A` | walk chunks to `IEND` | exact |
+| GIF | `GIF87a` / `GIF89a` | walk blocks to trailer `0x3B` | exact |
+| PDF | `%PDF-` | search for last `%%EOF` | best-effort |
+| ZIP (+ docx/xlsx/pptx/jar/apk) | `PK\x03\x04` | find End-Of-Central-Directory record | best-effort |
+| WAV | `RIFF`...`WAVE` | RIFF chunk-size field | exact |
+| AVI | `RIFF`...`AVI ` | RIFF chunk-size field | exact |
+| BMP | `BM` | cross-checked header fields (high false-positive rate otherwise) | exact |
+| SQLite | `SQLite format 3\0` | page size × page count from header | exact |
+| MP4/MOV | `ftyp` | walk top-level boxes | exact |
+
+A file is flagged `TRUNCATED` when its extent function ran out of data or
+hit the format's max-size cap without finding a real end marker — the
+recovered bytes may be incomplete.
+
+### Read layer (`source.py`)
+
+Raw character devices on macOS reject single reads over ~8 MB (`EINVAL`) and
+require sector-aligned (512-byte) offsets, so every read is split into
+sector-aligned ≤8 MB chunks and re-stitched. A single-slot cache keeps the
+last large read in memory so that dense clusters of nearby lookups (e.g. the
+extent search for dozens of JPEGs packed close together) hit memory instead
+of re-reading the device — this was added because scans were stalling on
+signature clusters without it.
+
+### Database (`db.py`)
+
+SQLite, WAL mode, 10s busy timeout (so the GUI's background polling doesn't
+collide with a running scan's writes). Three tables: `scans` (progress
+checkpoint), `found_files` (one row per carved file), `scan_errors`. Schema
+is created on first connect; `ALTER TABLE` migrations for older DBs run
+automatically and silently no-op if the column already exists.
 
 ## Install
 
@@ -33,45 +87,96 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-This installs the `filerecovery` CLI command into your virtualenv.
-
-To also install the desktop GUI:
-
-```bash
-pip install -e ".[gui]"
-```
-
-## GUI
-
-The graphical interface lets you select a drive, watch the scan run live, browse found files with image previews and dates, and restore files to a destination — no terminal required.
-
-**Launch:**
+This installs the `filerecovery` CLI (`list-disks`, `scan`, `list`,
+`recover`, `serve`) into your virtualenv. Date/thumbnail extraction needs
+Pillow; install it with:
 
 ```bash
-filerecovery-gui
+pip install -e ".[gui]"   # also pulls in PyQt6 for the legacy desktop GUI
 ```
 
-Raw disk access requires root on macOS and Linux. If you see a permission error after selecting a drive, relaunch with:
+## Running the GUI (current, recommended path)
+
+The GUI is a static web page — hosted on GitHub Pages at
+**https://dannyleb.github.io/file-recovery-tool/** — that talks to a small
+local server for anything that needs real disk access (scanning, previews,
+recovery). The page itself never leaves your machine; GitHub Pages just
+serves the HTML/JS.
+
+**1. Start the local server** (needs root for raw disk access):
 
 ```bash
-sudo filerecovery-gui
+sudo filerecovery serve --db recovery.db --source /dev/rdisk2 --port 7523
 ```
 
-**Workflow:**
+- `--db` — path to the scan database (created if it doesn't exist; reuse the
+  same file to resume browsing a previous scan)
+- `--source` — the device or disk image previews/recovery will read from.
+  Omit it if you only want to browse a finished scan's metadata (no previews).
+- `--port` — defaults to `7523`
 
-1. **Open / New DB** (toolbar) — create or open a `.db` file to store scan results. Scan databases are portable; you can run the scan now and browse/recover later.
-2. **Select a drive** in the left sidebar under *Devices*, then click **Scan Disk…**.
-3. Watch the progress bar and live file count. You can click into the results table while the scan is still running.
-4. When the scan finishes, image files (JPEG, PNG, GIF, BMP) automatically load thumbnails in the background. The right-side panel shows a preview and metadata — type, size, date (extracted from EXIF/file headers where available), and byte offset.
-5. Select one or more rows and click **Recover Selected**, or use **Recover All**, to copy the files to a folder you choose. The destination must be on a *different* drive from the one being scanned.
+You'll see:
+```
+File Recovery server → http://localhost:7523
+  DB     : recovery.db
+  Source : /dev/rdisk2
+  GUI    : https://dannyleb.github.io/file-recovery-tool/
+```
 
-Previous scans are listed under *Scans* in the sidebar and can be reopened at any time.
+**2. Open the GUI** — go to https://dannyleb.github.io/file-recovery-tool/
+in your browser. On load it probes `http://localhost:7523/api/status`
+automatically; once it gets a response the server-dependent controls
+(previews, recover-without-terminal, filters) light up. Chrome/Safari both
+allow an `https://` page to call `http://localhost` — that's a built-in
+"secure context" exception, not something you need to configure.
 
-**Dates:** For JPEG files the date shown is the EXIF `DateTimeOriginal` field if present. For PNG files it comes from the `Creation Time` tEXt chunk. For MP4/MOV files it comes from the `mvhd` box. Files without embedded date metadata show a blank date field.
+If you'd rather not depend on GitHub Pages being reachable, the same page is
+served directly by the local server too — `http://localhost:7523/` renders
+identically and needs no internet access.
 
-**Filenames:** Signature-based carving cannot recover original filenames. Recovered files are named by type and disk offset (e.g. `jpeg_000005206000.jpg`), which makes them uniquely identifiable and easy to sort.
+**3. Use it** — pick a scan from the sidebar (most recent is auto-selected),
+watch progress live if one's running, browse/filter found files (type,
+"Has Date", "Previews Only", "Hide Truncated"), arrow-key through the list
+with live preview, and select rows → **Recover** to copy them out through
+the `/api/recover` endpoint, no terminal needed.
 
-## Usage
+### API reference (`filerecovery/server.py`)
+
+All endpoints are plain JSON over HTTP on `127.0.0.1`, CORS-open (`*`), no
+auth — it's meant to be reachable only from your own browser on the same
+machine.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/status` | `{ok, db, source}` — used by the GUI to detect the server |
+| GET | `/api/scans` | List all scans in the DB |
+| GET | `/api/scans/<id>` | One scan's progress/metadata |
+| GET | `/api/scans/<id>/files?type=JPEG` | Found files for a scan, optional type filter |
+| GET | `/api/scans/<id>/valid-previews` | Re-validates each image file's header against the live source; returns the ids that are genuinely renderable |
+| GET | `/api/errors/<scan_id>` | Last 200 scan errors |
+| GET | `/api/preview/<found_id>` | Raw bytes (capped at 10 MB) for inline image/PDF preview |
+| POST | `/api/recover` | `{scan_id, ids: [...] or "all", dest}` → copies files, returns `{recovered, errors}` |
+| GET | `/` | Serves `index.html` itself |
+
+`--source` must be set for anything that reads the drive (previews, recover,
+valid-previews) — without it those return `503`.
+
+## Legacy desktop GUI (PyQt6)
+
+A native desktop GUI (`filerecovery-gui`) exists from before the pivot to
+the web GUI above. It still works but isn't being actively developed —
+the web GUI superseded it to sidestep PyQt6 rendering/Full-Disk-Access
+quirks on macOS. Launch with:
+
+```bash
+filerecovery-gui        # or: sudo filerecovery-gui for raw disk access
+```
+
+Workflow: **Open/New DB** → select a drive under *Devices* → **Scan Disk…**
+→ browse results with thumbnails/dates in the right panel → select rows →
+**Recover Selected** / **Recover All**.
+
+## CLI usage (works standalone, no GUI/server needed)
 
 **1. Find your drive's device path.**
 
@@ -133,16 +238,17 @@ scanning can overwrite other deleted data you haven't recovered yet.
 
 This tool only does signature-based carving. That means:
 
-- **No original filenames, folder structure, or timestamps.** Carving finds
-  file *content*, not filesystem metadata — recovered files are named by
-  type and the byte offset they were found at (e.g. `jpeg_000005206000.jpg`).
-- **A few formats are exact, most are best-effort.** PNG, GIF, MP4/MOV, WAV,
-  AVI, BMP, ZIP, and SQLite are bounded by parsing the format's own internal
-  structure, so their recovered length is exact when that structure is
-  intact. JPEG and PDF are found by searching for a known footer, which is
-  reliable in practice but not a hard guarantee. A file flagged `TRUNCATED`
-  means no footer/terminator was found and the tool gave up at a size cap —
-  the recovered bytes are likely incomplete or include trailing garbage.
+- **No original filenames, folder structure, or timestamps from the
+  filesystem.** Carving finds file *content*, not filesystem metadata —
+  recovered files are named by type and the byte offset they were found at
+  (e.g. `jpeg_000005206000.jpg`). Some formats carry their own embedded date
+  (JPEG EXIF, PNG tEXt, MP4 `mvhd`) and that's extracted separately — see
+  `metadata.py` — but there's no original filename anywhere to recover from.
+- **A few formats are exact, most are best-effort** — see the table above.
+  JPEG, PDF, and ZIP are footer/record-search based, which is reliable in
+  practice but not a hard guarantee. A file flagged `TRUNCATED` means no
+  footer/terminator was found and the tool gave up at a size cap — the
+  recovered bytes are likely incomplete or include trailing garbage.
 - **Heavily fragmented files will not recover correctly.** If a file's data
   was split into non-contiguous pieces on disk (common on a nearly-full or
   heavily-used drive), carving only recovers the first contiguous chunk.
