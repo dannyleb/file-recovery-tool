@@ -664,7 +664,7 @@ class MainWindow(QMainWindow):
     def _sidebar_clicked(self, item: QTreeWidgetItem, _col: int):
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(data, int):
-            self._load_scan(data)
+            self._load_scan(data, start_thumbs=True)
 
     # ------------------------------------------------------------------ file list
 
@@ -704,7 +704,17 @@ class MainWindow(QMainWindow):
             return
         self._thumb_loader = ThumbnailLoader(source_path, image_files)
         self._thumb_loader.thumbnail_ready.connect(self.model.set_thumbnail)
+        self._thumb_loader.thumbnail_ready.connect(self._on_thumbnail_ready)
         self._thumb_loader.start()
+
+    def _on_thumbnail_ready(self, found_id: int, _pixmap: QPixmap):
+        """Refresh preview if the newly-loaded thumbnail belongs to the selected row."""
+        rows = self.table.selectionModel().selectedRows()
+        if len(rows) == 1:
+            src_idx = self.proxy.mapToSource(rows[0])
+            f = self.model.get_file(src_idx.row())
+            if f and f.id == found_id:
+                self._update_preview(rows[0])
 
     def _apply_filter(self, text: str):
         if text == "All Types":
