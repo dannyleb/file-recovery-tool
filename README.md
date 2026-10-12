@@ -12,6 +12,67 @@ then work out exactly how long that file is by parsing the format's own
 internal structure (or, when that's not possible, by capping at a sane
 maximum size).
 
+## Quickstart (macOS, from scratch)
+
+```bash
+# 1. Get the code
+git clone https://github.com/dannyleb/file-recovery-tool
+cd file-recovery-tool
+
+# 2. Install
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+
+# 3. Confirm the install and find your drive
+which filerecovery
+filerecovery list-disks
+```
+
+`list-disks` prints each attached drive's device path — note the one for
+the drive you want to recover from (e.g. `/dev/rdisk2`) and double-check its
+size against Finder/Disk Utility before continuing, since the next step
+reads the entire thing.
+
+```bash
+# 4. Start the local server (needs root for raw disk access)
+sudo "$(which filerecovery)" serve --db ~/recovery.db --port 7523
+```
+
+Use `sudo "$(which filerecovery)" ...`, not just `sudo filerecovery ...` —
+`sudo` resets your `PATH`, so it can't see the copy of `filerecovery`
+installed inside your virtualenv's `bin/` folder. Resolving the full path
+first with `which` and handing that to `sudo` sidesteps it. If you still get
+`command not found`, your venv probably isn't active in this terminal —
+run `source .venv/bin/activate` again and re-check with `which filerecovery`
+before retrying.
+
+Leave this terminal open; it's your server. You should see:
+```
+File Recovery server → http://localhost:7523
+  DB     : /Users/you/recovery.db
+  ...
+Press Ctrl+C to stop.
+```
+
+Now, in your browser:
+
+5. Go to **https://dannyleb.github.io/file-recovery-tool/**
+6. Click **Open DB…** and select the `recovery.db` file from step 4
+7. Click **Scan Disk…**, pick your drive from the list, confirm — progress
+   shows live, right in the browser, no second terminal needed
+8. Once files show up, select some (or **Recover All**) and click
+   **Recover Selected**
+
+**If you hit a permission error anywhere in steps 4–8** on macOS, it's
+almost always **Full Disk Access**, not a bug: go to **System Settings →
+Privacy & Security → Full Disk Access**, add your terminal app (Terminal.app
+or iTerm), then fully quit and reopen that terminal before retrying. `sudo`
+does **not** bypass this — root privileges and Full Disk Access are two
+separate permission systems on modern macOS, and raw disk reads (plus
+writes to protected folders like Desktop/Documents/Downloads) need the
+latter regardless of UID.
+
 ## Architecture
 
 ```
@@ -101,44 +162,49 @@ The GUI is a static web page — hosted on GitHub Pages at
 **https://dannyleb.github.io/file-recovery-tool/** — that talks to a small
 local server for anything that needs real disk access (scanning, previews,
 recovery). The page itself never leaves your machine; GitHub Pages just
-serves the HTML/JS.
+serves the HTML/JS. See the Quickstart above for the full from-scratch
+walkthrough; this section covers the pieces in more depth.
 
 **1. Start the local server** (needs root for raw disk access):
 
 ```bash
-sudo filerecovery serve --db recovery.db --source /dev/rdisk2 --port 7523
+sudo "$(which filerecovery)" serve --db recovery.db --port 7523
 ```
 
 - `--db` — path to the scan database (created if it doesn't exist; reuse the
   same file to resume browsing a previous scan)
-- `--source` — the device or disk image previews/recovery will read from.
-  Omit it if you only want to browse a finished scan's metadata (no previews).
+- `--source` — optional. The device or disk image to read for previews and
+  recovery. You normally don't need this anymore — pick a drive from the
+  **Scan Disk…** button in the GUI instead, and the server adopts whatever
+  you pick. Pass it explicitly only if you want to browse/recover an
+  existing scan's results without starting a new one.
 - `--port` — defaults to `7523`
-
-You'll see:
-```
-File Recovery server → http://localhost:7523
-  DB     : recovery.db
-  Source : /dev/rdisk2
-  GUI    : https://dannyleb.github.io/file-recovery-tool/
-```
 
 **2. Open the GUI** — go to https://dannyleb.github.io/file-recovery-tool/
 in your browser. On load it probes `http://localhost:7523/api/status`
 automatically; once it gets a response the server-dependent controls
-(previews, recover-without-terminal, filters) light up. Chrome/Safari both
-allow an `https://` page to call `http://localhost` — that's a built-in
-"secure context" exception, not something you need to configure.
+(scanning, previews, recover-without-terminal, filters) light up.
+Chrome/Safari both allow an `https://` page to call `http://localhost` —
+that's a built-in "secure context" exception, not something you need to
+configure.
 
 If you'd rather not depend on GitHub Pages being reachable, the same page is
 served directly by the local server too — `http://localhost:7523/` renders
 identically and needs no internet access.
 
-**3. Use it** — pick a scan from the sidebar (most recent is auto-selected),
-watch progress live if one's running, browse/filter found files (type,
+**3. Open a database, then scan** — **Open DB…** to create/open a
+`recovery.db` (the File System Access API, so Chrome or Edge), then
+**Scan Disk…** to list attached drives (via the server) and start a scan on
+whichever one you pick, running in a background thread on the server — no
+second terminal. A **Stop Scan** button appears in the toolbar while a scan
+is running (whether it was started from the GUI or from `filerecovery scan`
+in a terminal — both check the same stop flag).
+
+**4. Browse and recover** — pick a scan from the sidebar (most recent is
+auto-selected), watch progress live, browse/filter found files (type,
 "Has Date", "Previews Only", "Hide Truncated"), arrow-key through the list
-with live preview, and select rows → **Recover** to copy them out through
-the `/api/recover` endpoint, no terminal needed.
+with live image/video preview, and select rows → **Recover** to copy them
+out through the `/api/recover` endpoint, no terminal needed.
 
 ### API reference (`filerecovery/server.py`)
 
@@ -149,17 +215,25 @@ machine.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/status` | `{ok, db, source}` — used by the GUI to detect the server |
+| GET | `/api/disks` | Attached drives (device, size, description, removable) for the Scan Disk picker |
+| POST | `/api/scan/start` | `{device}` → starts a scan in a background thread on the server |
+| GET | `/api/scan/active` | `{active, scan_id, device, error}` — status of a server-started scan |
+| POST | `/api/scans/<id>/stop` | Requests a running scan (GUI- or CLI-started) stop at the next chunk boundary |
 | GET | `/api/scans` | List all scans in the DB |
 | GET | `/api/scans/<id>` | One scan's progress/metadata |
 | GET | `/api/scans/<id>/files?type=JPEG` | Found files for a scan, optional type filter |
-| GET | `/api/scans/<id>/valid-previews` | Re-validates each image file's header against the live source; returns the ids that are genuinely renderable |
+| GET | `/api/scans/<id>/valid-previews` | Re-validates each image/video file's header against the live source; returns the ids that are genuinely renderable |
 | GET | `/api/errors/<scan_id>` | Last 200 scan errors |
-| GET | `/api/preview/<found_id>` | Raw bytes (capped at 10 MB) for inline image/PDF preview |
+| GET | `/api/preview/<found_id>` | Raw bytes (capped at 10 MB) for inline image/video preview |
 | POST | `/api/recover` | `{scan_id, ids: [...] or "all", dest}` → copies files, returns `{recovered, errors}` |
 | GET | `/` | Serves `index.html` itself |
 
-`--source` must be set for anything that reads the drive (previews, recover,
-valid-previews) — without it those return `503`.
+A `--source` must be set (explicitly at startup, or implicitly by starting a
+scan via `/api/scan/start`) for anything that reads the drive — previews,
+recover, valid-previews — without it those return `503`. `recover`'s `dest`
+defaults to `~/recovered`, resolved against the *invoking* user's home
+directory even when the server is running under `sudo` (via `SUDO_USER`) —
+not root's.
 
 ## Legacy desktop GUI (PyQt6)
 
@@ -169,12 +243,14 @@ the web GUI superseded it to sidestep PyQt6 rendering/Full-Disk-Access
 quirks on macOS. Launch with:
 
 ```bash
-filerecovery-gui        # or: sudo filerecovery-gui for raw disk access
+filerecovery-gui        # or: sudo "$(which filerecovery-gui)" for raw disk access
 ```
 
 Workflow: **Open/New DB** → select a drive under *Devices* → **Scan Disk…**
 → browse results with thumbnails/dates in the right panel → select rows →
-**Recover Selected** / **Recover All**.
+**Recover Selected** / **Recover All**. A **Destination** picker in the
+toolbar lets you set the recovery folder once and reuse it across
+recoveries instead of being asked every time.
 
 ## CLI usage (works standalone, no GUI/server needed)
 
@@ -196,15 +272,19 @@ proceed — the next command reads the *entire* drive.
 **2. Scan it.**
 
 ```bash
-sudo filerecovery scan /dev/rdisk2 --db recovery.db
+sudo "$(which filerecovery)" scan /dev/rdisk2 --db recovery.db
 ```
+
+(Use the resolved-path form, not plain `sudo filerecovery ...` — `sudo`
+resets `PATH` and won't see a `filerecovery` installed inside a virtualenv.
+See the Quickstart above if that's unfamiliar.)
 
 Raw disk access needs root. Scanning is read-only and will not modify the
 drive. Progress is saved as it goes, so if you need to stop, `Ctrl-C` and
 resume later:
 
 ```bash
-sudo filerecovery scan /dev/rdisk2 --db recovery.db --resume 1
+sudo "$(which filerecovery)" scan /dev/rdisk2 --db recovery.db --resume 1
 ```
 
 A full scan of a large drive can take hours — it's limited by how fast the
