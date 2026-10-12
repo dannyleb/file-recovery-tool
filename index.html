@@ -62,6 +62,8 @@
     .tb-btn:disabled { color: #AEAEB2; border-color: var(--border2); background: #F5F5F7; cursor: default; }
     .tb-btn.primary  { background: var(--blue); color: white; border-color: var(--blue); }
     .tb-btn.primary:hover:not(:disabled) { opacity: 0.85; background: var(--blue); }
+    .tb-btn.danger   { background: var(--red,#FF3B30); color: white; border-color: var(--red,#FF3B30); }
+    .tb-btn.danger:hover:not(:disabled)  { opacity: 0.85; }
 
     .tb-sep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; }
 
@@ -467,6 +469,7 @@
   <div class="tb-sep"></div>
   <button class="tb-btn" id="btn-recover-sel" onclick="recoverSelected()" disabled>Recover Selected</button>
   <button class="tb-btn" id="btn-recover-all" onclick="recoverAll()" disabled>Recover All</button>
+  <button class="tb-btn danger hidden" id="btn-stop-scan" onclick="stopScan()">Stop Scan</button>
   <div class="tb-spacer"></div>
   <button class="tb-btn" id="btn-previews-only" onclick="togglePreviewsOnly()" disabled title="Show only files with valid image previews">Previews Only</button>
   <button class="tb-btn" id="btn-has-date" onclick="toggleHasDate()" disabled title="Show only files with embedded date metadata">Has Date</button>
@@ -585,8 +588,8 @@
       <p id="scan-modal-intro">Pick a drive to scan for deleted files. Raw disk access needs the local server running with root (<code>sudo filerecovery serve …</code>).</p>
       <div id="scan-modal-list"></div>
       <div id="scan-modal-status"></div>
+      <p style="font-size:11px;color:var(--text3);margin-top:4px">Use the <strong>Stop Scan</strong> button in the toolbar to stop a running scan.</p>
       <div class="modal-btns">
-        <button class="tb-btn" id="scan-modal-stop" style="display:none" onclick="stopScan()">Stop Scan</button>
         <button class="tb-btn" onclick="closeScanModal()">Close</button>
       </div>
     </div>
@@ -803,18 +806,12 @@ async function startScanOn(device) {
   }
 }
 
-async function stopScan() {
-  if (!S.serverUrl) return;
-  try { await fetch(`${S.serverUrl}/api/scan/stop`, { method: 'POST' }); } catch (_) {}
-}
-
 async function pollScanModal() {
   if (!S.serverUrl) return;
   try {
     const res  = await fetch(`${S.serverUrl}/api/scan/active`);
     const data = await res.json();
 
-    document.getElementById('scan-modal-stop').style.display = data.active ? 'inline-block' : 'none';
     const status = document.getElementById('scan-modal-status');
     if (data.error) {
       status.textContent = 'Error: ' + data.error;
@@ -1015,6 +1012,7 @@ function finishLoadingFiles(scanId) {
   document.getElementById('btn-previews-only').disabled = !S.serverUrl;
   document.getElementById('btn-has-date').disabled = S.allFiles.length === 0;
   document.getElementById('btn-hide-truncated').disabled = S.allFiles.length === 0;
+  updateStopButton(scanId);
 }
 
 function updateProgressUI(scanId) {
@@ -1032,6 +1030,7 @@ function updateProgressUI(scanId) {
     fill.className = 'progress-fill';
     fill.style.width = pct.toFixed(1) + '%';
   }
+  updateStopButton(scanId);
 }
 
 // ============================================================
@@ -1344,6 +1343,35 @@ async function loadPreviewMedia(f, kind) {
 // ============================================================
 // RECOVERY
 // ============================================================
+function updateStopButton(scanId) {
+  const btn  = document.getElementById('btn-stop-scan');
+  const scan = S.scans.find(s => s.id === scanId);
+  const show = S.serverUrl && scan && !scan.fin;
+  btn.classList.toggle('hidden', !show);
+  btn.disabled = !show;
+}
+
+async function stopScan() {
+  if (!S.serverUrl || S.currentScanId === null) return;
+  const btn = document.getElementById('btn-stop-scan');
+  btn.disabled = true;
+  btn.textContent = 'Stopping…';
+  try {
+    const res = await fetch(`${S.serverUrl}/api/scans/${S.currentScanId}/stop`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      alert('Stop failed: ' + (data.error || res.status));
+      btn.disabled = false;
+      btn.textContent = 'Stop Scan';
+    }
+    // Button will hide automatically once the scan's finished_at appears via polling
+  } catch (e) {
+    alert('Stop request failed: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Stop Scan';
+  }
+}
+
 async function recoverSelected() {
   const files = S.allFiles.filter(f => S.selectedIds.has(f.id));
   await doRecover(files);

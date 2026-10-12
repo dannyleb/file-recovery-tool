@@ -38,6 +38,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QPushButton,
     QSizePolicy,
     QSplitter,
     QStatusBar,
@@ -45,6 +46,7 @@ from PyQt6.QtWidgets import (
     QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
+    QHBoxLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -326,6 +328,7 @@ class MainWindow(QMainWindow):
         self._thumb_loader: Optional[ThumbnailLoader] = None
         self.disks: List[Disk] = []
         self._poll_timer: Optional[QTimer] = None
+        self._recover_dest: str = ""
 
         self._build_ui()
         self._apply_style()
@@ -374,6 +377,33 @@ class MainWindow(QMainWindow):
         self.act_recover_all.setEnabled(False)
         self.act_recover_all.triggered.connect(self._recover_all)
         tb.addAction(self.act_recover_all)
+
+        tb.addSeparator()
+
+        dest_widget = QWidget()
+        dest_layout = QHBoxLayout(dest_widget)
+        dest_layout.setContentsMargins(4, 0, 4, 0)
+        dest_layout.setSpacing(4)
+
+        dest_label = QLabel("Destination:")
+        dest_label.setStyleSheet("font-size: 12px; color: #8E8E93;")
+        dest_layout.addWidget(dest_label)
+
+        self._dest_path_label = QLabel("Not set")
+        self._dest_path_label.setStyleSheet(
+            "font-size: 12px; color: #1C1C1E; max-width: 240px;"
+        )
+        self._dest_path_label.setMaximumWidth(240)
+        dest_layout.addWidget(self._dest_path_label)
+
+        self._dest_browse_btn = QPushButton("Browse…")
+        self._dest_browse_btn.setStyleSheet(
+            "font-size: 12px; padding: 2px 8px; border-radius: 4px;"
+        )
+        self._dest_browse_btn.clicked.connect(self._pick_dest)
+        dest_layout.addWidget(self._dest_browse_btn)
+
+        tb.addWidget(dest_widget)
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -664,7 +694,7 @@ class MainWindow(QMainWindow):
     def _sidebar_clicked(self, item: QTreeWidgetItem, _col: int):
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(data, int):
-            self._load_scan(data)
+            self._load_scan(data, start_thumbs=True)
 
     # ------------------------------------------------------------------ file list
 
@@ -704,7 +734,17 @@ class MainWindow(QMainWindow):
             return
         self._thumb_loader = ThumbnailLoader(source_path, image_files)
         self._thumb_loader.thumbnail_ready.connect(self.model.set_thumbnail)
+        self._thumb_loader.thumbnail_ready.connect(self._on_thumbnail_ready)
         self._thumb_loader.start()
+
+    def _on_thumbnail_ready(self, found_id: int, _pixmap: QPixmap):
+        """Refresh preview if the newly-loaded thumbnail belongs to the selected row."""
+        rows = self.table.selectionModel().selectedRows()
+        if len(rows) == 1:
+            src_idx = self.proxy.mapToSource(rows[0])
+            f = self.model.get_file(src_idx.row())
+            if f and f.id == found_id:
+                self._update_preview(rows[0])
 
     def _apply_filter(self, text: str):
         if text == "All Types":
@@ -880,6 +920,25 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ recover
 
+    def _pick_dest(self):
+        start = self._recover_dest or str(Path.home())
+        dest = QFileDialog.getExistingDirectory(self, "Choose Recovery Destination", start)
+        if dest:
+            self._recover_dest = dest
+            self._update_dest_label()
+
+    def _update_dest_label(self):
+        if self._recover_dest:
+            # Show up to the last two path components to keep it readable
+            p = Path(self._recover_dest)
+            parts = p.parts
+            display = str(Path(*parts[-2:])) if len(parts) >= 2 else self._recover_dest
+            self._dest_path_label.setText(display)
+            self._dest_path_label.setToolTip(self._recover_dest)
+        else:
+            self._dest_path_label.setText("Not set")
+            self._dest_path_label.setToolTip("")
+
     def _get_selected_files(self) -> list[FoundFile]:
         files = []
         for idx in self.table.selectionModel().selectedRows():
@@ -902,9 +961,9 @@ class MainWindow(QMainWindow):
         if scan is None:
             return
 
-        dest = QFileDialog.getExistingDirectory(
-            self, "Choose Recovery Destination", str(Path.home())
-        )
+        if not self._recover_dest:
+            self._pick_dest()
+        dest = self._recover_dest
         if not dest:
             return
 

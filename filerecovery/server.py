@@ -119,8 +119,17 @@ class _Handler(BaseHTTPRequestHandler):
                 self._recover(body)
             elif path == "/api/scan/start":
                 self._start_scan(body)
-            elif path == "/api/scan/stop":
-                self._stop_scan()
+            elif path.startswith("/api/scans/") and path.endswith("/stop"):
+                scan_id = int(path.split("/")[3])
+                with ScanDB(self.server.db_path) as db:
+                    row = db.get_scan(scan_id)
+                    if row is None:
+                        self._json({"error": "not found"}, 404)
+                    elif row["finished_at"] is not None:
+                        self._json({"error": "scan already finished"}, 409)
+                    else:
+                        db.request_stop(scan_id)
+                        self._json({"ok": True, "scan_id": scan_id})
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as exc:
@@ -285,10 +294,8 @@ class _Handler(BaseHTTPRequestHandler):
         if self.server.scan_thread and self.server.scan_thread.is_alive():
             return self._json({"error": "a scan is already running on this server"}, 409)
 
-        resume_id  = body.get("resume_scan_id")
-        db_path    = self.server.db_path
-        stop_event = threading.Event()
-        self.server.scan_stop_event = stop_event
+        resume_id = body.get("resume_scan_id")
+        db_path   = self.server.db_path
         self.server.scan_error = None
 
         def run():
@@ -312,8 +319,11 @@ class _Handler(BaseHTTPRequestHandler):
 
                 self.server.scan_active_id = scan_id
                 try:
+                    # Same stop_requested flag the CLI checks, so a scan started
+                    # from the GUI can be stopped the same way as one started
+                    # from a terminal (and vice versa) — one mechanism either way.
                     run_scan(source, db, scan_id, start_offset=start_offset,
-                             stop_check=lambda: stop_event.is_set())
+                             stop_check=lambda: db.is_stop_requested(scan_id))
                 except Exception as e:
                     self.server.scan_error = _friendly_error(e)
                     db.log_error(scan_id, e)
@@ -325,11 +335,6 @@ class _Handler(BaseHTTPRequestHandler):
         self.server.scan_thread = t
         t.start()
         self._json({"ok": True, "device": device})
-
-    def _stop_scan(self):
-        if self.server.scan_stop_event:
-            self.server.scan_stop_event.set()
-        self._json({"ok": True})
 
     def _serve_preview(self, found_id: int):
         src = self.server.source_path
@@ -378,7 +383,6 @@ class _Server(HTTPServer):
         self.db_path     = db_path
         self.source_path = source_path
         self.scan_thread      = None
-        self.scan_stop_event  = None
         self.scan_active_id   = None
         self.scan_error       = None
         super().__init__(("127.0.0.1", port), _Handler)

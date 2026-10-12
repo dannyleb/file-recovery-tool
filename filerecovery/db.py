@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS scans (
     started_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     finished_at REAL,
-    bytes_scanned INTEGER NOT NULL DEFAULT 0
+    bytes_scanned INTEGER NOT NULL DEFAULT 0,
+    stop_requested INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS found_files (
@@ -72,11 +73,15 @@ class ScanDB:
         self.conn.executescript(SCHEMA)
         self.conn.commit()
         # Migrate pre-existing databases that lack newer columns
-        try:
-            self.conn.execute("ALTER TABLE found_files ADD COLUMN file_date REAL")
-            self.conn.commit()
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        for migration in [
+            "ALTER TABLE found_files ADD COLUMN file_date REAL",
+            "ALTER TABLE scans ADD COLUMN stop_requested INTEGER NOT NULL DEFAULT 0",
+        ]:
+            try:
+                self.conn.execute(migration)
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     def start_scan(self, source_path: str, source_size: int) -> int:
         now = time.time()
@@ -111,6 +116,16 @@ class ScanDB:
     def finish_scan(self, scan_id: int):
         self.conn.execute("UPDATE scans SET finished_at = ? WHERE id = ?", (time.time(), scan_id))
         self.conn.commit()
+
+    def request_stop(self, scan_id: int):
+        self.conn.execute("UPDATE scans SET stop_requested = 1 WHERE id = ?", (scan_id,))
+        self.conn.commit()
+
+    def is_stop_requested(self, scan_id: int) -> bool:
+        row = self.conn.execute(
+            "SELECT stop_requested FROM scans WHERE id = ?", (scan_id,)
+        ).fetchone()
+        return bool(row and row["stop_requested"])
 
     def add_found_file(
         self,
