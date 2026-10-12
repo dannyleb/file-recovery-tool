@@ -274,6 +274,7 @@
       flex-shrink: 0;
     }
     #preview-img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
+    #preview-video { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
     #preview-icon { display: block; }
     #preview-meta {
       padding: 12px 14px;
@@ -436,6 +437,22 @@
     }
     .modal-btns { display: flex; justify-content: flex-end; gap: 8px; }
 
+    .disk-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .disk-item:hover { background: #F2F2F7; border-color: var(--blue); }
+    .disk-item .disk-name { font-weight: 500; }
+    .disk-item .disk-sub  { font-size: 11px; color: var(--text3); }
+    #scan-modal-list { max-height: 280px; overflow-y: auto; margin-bottom: 10px; }
+    #scan-modal-status { font-size: 12px; color: var(--text2); margin-top: 8px; }
+
     .hidden { display: none !important; }
   </style>
 </head>
@@ -446,6 +463,7 @@
   <button class="tb-btn primary" onclick="openDB()">Open DB…</button>
   <div class="tb-sep"></div>
   <button class="tb-btn" id="btn-open-source" onclick="openSource()" disabled>Open Source…</button>
+  <button class="tb-btn" id="btn-scan-disk" onclick="openScanModal()" disabled title="Requires the local server (sudo filerecovery serve)">Scan Disk…</button>
   <div class="tb-sep"></div>
   <button class="tb-btn" id="btn-recover-sel" onclick="recoverSelected()" disabled>Recover Selected</button>
   <button class="tb-btn" id="btn-recover-all" onclick="recoverAll()" disabled>Recover All</button>
@@ -530,6 +548,7 @@
       <div id="preview-img-wrap">
         <span id="preview-icon"></span>
         <img id="preview-img" alt="preview">
+        <video id="preview-video" controls muted></video>
       </div>
       <div id="preview-meta"></div>
     </div>
@@ -553,6 +572,22 @@
       <div class="modal-btns">
         <button class="tb-btn" onclick="closeModal()">Close</button>
         <button class="tb-btn" id="modal-copy-btn" onclick="copyModalCode()" class="hidden">Copy Command</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCAN MODAL -->
+<div id="scan-modal" class="hidden">
+  <div class="modal-backdrop" onclick="closeScanModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <h3>Scan a Disk</h3>
+      <p id="scan-modal-intro">Pick a drive to scan for deleted files. Raw disk access needs the local server running with root (<code>sudo filerecovery serve …</code>).</p>
+      <div id="scan-modal-list"></div>
+      <div id="scan-modal-status"></div>
+      <div class="modal-btns">
+        <button class="tb-btn" id="scan-modal-stop" style="display:none" onclick="stopScan()">Stop Scan</button>
+        <button class="tb-btn" onclick="closeScanModal()">Close</button>
       </div>
     </div>
   </div>
@@ -633,6 +668,7 @@ async function openDB() {
   document.getElementById('table-scroll').classList.remove('hidden');
   document.getElementById('pagination').classList.remove('hidden');
   document.getElementById('btn-open-source').disabled = false;
+  document.getElementById('btn-scan-disk').disabled = !S.serverUrl;
 
   await refreshDB();
   startPolling();
@@ -675,13 +711,14 @@ function setServerBadge(connected) {
     badge.textContent = '⬤ Server';
     badge.style.background = '#E8F5E9';
     badge.style.color = '#34C759';
-    badge.title = 'Local server connected — image previews enabled';
+    badge.title = 'Local server connected — scanning, previews, and recovery enabled';
   } else {
     badge.textContent = '⬤ No server';
     badge.style.background = '#F2F2F7';
     badge.style.color = '#8E8E93';
-    badge.title = 'Run: sudo filerecovery serve --db /path/recovery.db --source /dev/rdisk2';
+    badge.title = 'Run: sudo filerecovery serve --db /path/recovery.db  (pick a drive with Scan Disk… once connected — --source is optional)';
   }
+  document.getElementById('btn-scan-disk').disabled = !(connected && S.dbHandle);
 }
 
 // ============================================================
@@ -696,10 +733,125 @@ async function openSource() {
 }
 
 // ============================================================
+// SCAN DISK (drives a scan on the local server — no second terminal)
+// ============================================================
+let S_scanModalTimer = null;
+
+async function openScanModal() {
+  if (!S.serverUrl) return;
+  document.getElementById('scan-modal').classList.remove('hidden');
+  document.getElementById('scan-modal-list').innerHTML = 'Loading drives…';
+  document.getElementById('scan-modal-status').textContent = '';
+  await refreshDiskList();
+  await pollScanModal();
+  if (S_scanModalTimer) clearInterval(S_scanModalTimer);
+  S_scanModalTimer = setInterval(pollScanModal, 2000);
+}
+
+function closeScanModal() {
+  document.getElementById('scan-modal').classList.add('hidden');
+  if (S_scanModalTimer) { clearInterval(S_scanModalTimer); S_scanModalTimer = null; }
+}
+
+async function refreshDiskList() {
+  try {
+    const res = await fetch(`${S.serverUrl}/api/disks`);
+    const disks = await res.json();
+    renderDiskList(Array.isArray(disks) ? disks : []);
+  } catch (e) {
+    document.getElementById('scan-modal-list').innerHTML =
+      `<div style="color:var(--text3)">Could not list drives: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderDiskList(disks) {
+  const list = document.getElementById('scan-modal-list');
+  if (!disks.length) {
+    list.innerHTML = '<div style="color:var(--text3)">No drives found. Use the CLI with an explicit device or image path instead.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  disks.forEach(d => {
+    const div = document.createElement('div');
+    div.className = 'disk-item';
+    div.onclick = () => startScanOn(d.device);
+    div.innerHTML = `
+      <span style="font-size:22px">💾</span>
+      <span style="flex:1">
+        <div class="disk-name">${escHtml(d.description)}${d.removable ? ' (removable)' : ''}</div>
+        <div class="disk-sub">${escHtml(d.device)} · ${fmtSize(d.size_bytes)}</div>
+      </span>`;
+    list.appendChild(div);
+  });
+}
+
+async function startScanOn(device) {
+  if (!confirm(`Scan ${device}?\n\nThis reads the entire drive from start to end and can take a long time on a large drive. It will not write to the drive.`)) return;
+  document.getElementById('scan-modal-status').textContent = `Starting scan on ${device}…`;
+  try {
+    const res  = await fetch(`${S.serverUrl}/api/scan/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      document.getElementById('scan-modal-status').textContent = 'Error: ' + data.error;
+    }
+  } catch (e) {
+    document.getElementById('scan-modal-status').textContent = 'Error: ' + e.message;
+  }
+}
+
+async function stopScan() {
+  if (!S.serverUrl) return;
+  try { await fetch(`${S.serverUrl}/api/scan/stop`, { method: 'POST' }); } catch (_) {}
+}
+
+async function pollScanModal() {
+  if (!S.serverUrl) return;
+  try {
+    const res  = await fetch(`${S.serverUrl}/api/scan/active`);
+    const data = await res.json();
+
+    document.getElementById('scan-modal-stop').style.display = data.active ? 'inline-block' : 'none';
+    const status = document.getElementById('scan-modal-status');
+    if (data.error) {
+      status.textContent = 'Error: ' + data.error;
+    } else if (data.active) {
+      status.textContent = `Scanning ${data.device} (scan ${data.scan_id})…`;
+    } else if (status.textContent.startsWith('Scanning')) {
+      status.textContent = 'Scan finished.';
+      refreshDiskList();
+    }
+
+    if (data.active && data.scan_id !== null && S.currentScanId !== data.scan_id) {
+      selectScan(data.scan_id);   // follow the running scan — also refreshes
+    } else {
+      await refreshDB();
+    }
+  } catch (_) {}
+}
+
+// ============================================================
 // READ & REFRESH
 // ============================================================
 async function refreshDB() {
   if (!S.dbHandle || !S.SQL) return;
+
+  // Prefer the live server: the DB runs in WAL mode, so a browser re-reading
+  // the raw .db file bytes directly (via sql.js below) only sees rows up to
+  // the last checkpoint — a scan in progress can look frozen for minutes.
+  // The server's sqlite3 connection reads through the WAL and is always fresh.
+  if (S.serverUrl) {
+    try {
+      await refreshFromServer();
+      return;
+    } catch (e) {
+      console.error('Server refresh failed, falling back to local DB file:', e);
+    }
+  }
+
   let db;
   try {
     const file = await S.dbHandle.getFile();
@@ -711,14 +863,50 @@ async function refreshDB() {
     loadScans(db);
     if (S.currentScanId !== null) {
       loadFiles(db, S.currentScanId);
-      updateProgress(db, S.currentScanId);
+      updateProgressUI(S.currentScanId);
     }
   } finally { db.close(); }
 }
 
+async function refreshFromServer() {
+  const res   = await fetch(`${S.serverUrl}/api/scans`);
+  const scans = await res.json();
+  S.scans = scans.map(s => ({
+    id: s.id, src: s.source_path, size: s.source_size,
+    done: s.bytes_scanned, start: s.started_at, fin: s.finished_at,
+    updatedAt: s.updated_at,
+  })).sort((a, b) => b.id - a.id);
+
+  if (S.currentScanId === null && S.scans.length) {
+    const running = S.scans.filter(s => !s.fin).sort((a,b) => b.updatedAt - a.updatedAt);
+    S.currentScanId = running.length ? running[0].id : S.scans[0].id;
+  }
+  renderScansList();
+
+  if (S.currentScanId !== null) {
+    const fres  = await fetch(`${S.serverUrl}/api/scans/${S.currentScanId}/files`);
+    const files = await fres.json();
+    S.allFiles = files.map(f => ({
+      id: f.id, file_type: f.file_type, extension: f.extension,
+      offset: f.offset, length: f.length, truncated: !!f.truncated,
+      file_date: f.file_date, recovered_path: f.recovered_path,
+      name: f.recovered_path ? f.recovered_path.replace(/^.*[/\\]/, '')
+                              : `${f.file_type.toLowerCase()}_${String(f.offset).padStart(12,'0')}.${f.extension}`,
+    }));
+    finishLoadingFiles(S.currentScanId);
+    updateProgressUI(S.currentScanId);
+
+    try {
+      const eres  = await fetch(`${S.serverUrl}/api/errors/${S.currentScanId}`);
+      const errs  = await eres.json();
+      renderErrors(S.currentScanId, errs.map(e => ({ ts: e.occurred_at, type: e.error_type, msg: e.message, off: e.offset })));
+    } catch (_) {}
+  }
+}
+
 function loadScans(db) {
   const res = db.exec('SELECT id,source_path,source_size,bytes_scanned,started_at,finished_at FROM scans ORDER BY id DESC');
-  if (!res.length) return;
+  if (!res.length) { S.scans = []; renderScansList(); return; }
   S.scans = res[0].values.map(([id,src,size,done,start,fin]) => ({id,src,size,done,start,fin,updatedAt:0}));
   // fetch updatedAt separately
   try {
@@ -728,6 +916,16 @@ function loadScans(db) {
     });
   } catch(e) {}
 
+  renderScansList();
+
+  if (S.currentScanId === null && S.scans.length) {
+    // Prefer the most recently updated in-progress scan, else most recent overall
+    const running = S.scans.filter(s => !s.fin).sort((a,b) => b.updatedAt - a.updatedAt);
+    selectScan(running.length ? running[0].id : S.scans[0].id);
+  }
+}
+
+function renderScansList() {
   const list = document.getElementById('scans-list');
   list.innerHTML = '';
   S.scans.forEach(s => {
@@ -743,12 +941,6 @@ function loadScans(db) {
       </span>`;
     list.appendChild(div);
   });
-
-  if (S.currentScanId === null && S.scans.length) {
-    // Prefer the most recently updated in-progress scan, else most recent overall
-    const running = S.scans.filter(s => !s.fin).sort((a,b) => b.updatedAt - a.updatedAt);
-    selectScan(running.length ? running[0].id : S.scans[0].id);
-  }
 }
 
 function selectScan(id) {
@@ -790,7 +982,20 @@ function loadFiles(db, scanId) {
     truncated:!!trunc, file_date:date, recovered_path:recov,
     name: recov ? recov.replace(/^.*[/\\]/, '') : `${ft.toLowerCase()}_${String(off).padStart(12,'0')}.${ext}`,
   })) : [];
+  finishLoadingFiles(scanId);
 
+  let errors = [];
+  try {
+    const eres = db.exec(
+      `SELECT occurred_at, error_type, message, offset FROM scan_errors
+       WHERE scan_id=${scanId} ORDER BY occurred_at DESC LIMIT 200`
+    );
+    if (eres.length) errors = eres[0].values.map(([ts, type, msg, off]) => ({ ts, type, msg, off }));
+  } catch (e) { /* table doesn't exist yet — ignore */ }
+  renderErrors(scanId, errors);
+}
+
+function finishLoadingFiles(scanId) {
   // Rebuild type filter
   const types = [...new Set(S.allFiles.map(f => f.file_type))].sort();
   const sel = document.getElementById('type-filter');
@@ -810,10 +1015,9 @@ function loadFiles(db, scanId) {
   document.getElementById('btn-previews-only').disabled = !S.serverUrl;
   document.getElementById('btn-has-date').disabled = S.allFiles.length === 0;
   document.getElementById('btn-hide-truncated').disabled = S.allFiles.length === 0;
-  loadErrors(db, scanId);
 }
 
-function updateProgress(db, scanId) {
+function updateProgressUI(scanId) {
   const scan = S.scans.find(s => s.id === scanId);
   if (!scan) return;
   const pct = scan.size ? (scan.done / scan.size * 100) : 0;
@@ -1056,16 +1260,24 @@ function showPreview(id) {
   const icon = TYPE_ICONS[f.file_type] || '📁';
   document.getElementById('preview-icon').textContent = icon;
 
-  // Clear old image
+  // Clear old media
   const img = document.getElementById('preview-img');
+  const vid = document.getElementById('preview-video');
   img.style.display = 'none';
   img.src = '';
+  vid.pause();
+  vid.removeAttribute('src');
+  vid.load();
+  vid.style.display = 'none';
   document.getElementById('preview-icon').style.display = 'block';
 
-  // Try to show image preview if source is open and it's an image
-  const imgTypes = new Set(['JPEG','PNG','GIF','BMP']);
+  // Try to show a preview if a source (server or local file) is open
+  const imgTypes   = new Set(['JPEG','PNG','GIF','BMP']);
+  const videoTypes = new Set(['MP4','MOV']);
   if ((S.sourceHandle || S.serverUrl) && imgTypes.has(f.file_type)) {
-    loadPreviewImage(f);
+    loadPreviewMedia(f, 'image');
+  } else if ((S.sourceHandle || S.serverUrl) && videoTypes.has(f.file_type)) {
+    loadPreviewMedia(f, 'video');
   }
 
   const status = f.recovered_path ? 'Recovered'
@@ -1086,17 +1298,18 @@ function showPreview(id) {
   ).join('');
 }
 
-async function loadPreviewImage(f) {
-  const img = document.getElementById('preview-img');
+async function loadPreviewMedia(f, kind) {
+  const el = document.getElementById(kind === 'video' ? 'preview-video' : 'preview-img');
+  const show = () => {
+    document.getElementById('preview-icon').style.display = 'none';
+    el.style.display = 'block';
+  };
 
   // Prefer local server (works with raw devices)
   if (S.serverUrl) {
-    img.onload = () => {
-      document.getElementById('preview-icon').style.display = 'none';
-      img.style.display = 'block';
-    };
-    img.onerror = () => {
-      img.style.display = 'none';
+    el.onload = el.onloadeddata = show;
+    el.onerror = () => {
+      el.style.display = 'none';
       // Evict from valid set so Previews Only filter self-corrects
       if (S.validPreviewIds.has(f.id)) {
         S.validPreviewIds.delete(f.id);
@@ -1107,25 +1320,24 @@ async function loadPreviewImage(f) {
         }
       }
     };
-    img.src = `${S.serverUrl}/api/preview/${f.id}`;
+    el.src = `${S.serverUrl}/api/preview/${f.id}`;
     return;
   }
 
-  // Fallback: File System Access API (works for image files, not raw devices)
+  // Fallback: File System Access API (works for local image/video files, not raw devices)
   if (!S.sourceHandle) return;
   try {
     const file  = await S.sourceHandle.getFile();
-    const slice = file.slice(f.offset, f.offset + Math.min(f.length, 512*1024));
-    const mime  = f.file_type === 'JPEG' ? 'image/jpeg'
+    const cap   = kind === 'video' ? 50 * 1024 * 1024 : 512 * 1024;
+    const slice = file.slice(f.offset, f.offset + Math.min(f.length, cap));
+    const mime  = kind === 'video' ? 'video/mp4'
+                : f.file_type === 'JPEG' ? 'image/jpeg'
                 : f.file_type === 'PNG'  ? 'image/png'
                 : f.file_type === 'GIF'  ? 'image/gif'
                 : 'image/bmp';
     const url   = URL.createObjectURL(new Blob([await slice.arrayBuffer()], { type: mime }));
-    img.onload  = () => {
-      document.getElementById('preview-icon').style.display = 'none';
-      img.style.display = 'block';
-    };
-    img.src = url;
+    el.onload = el.onloadeddata = show;
+    el.src = url;
   } catch (_) {}
 }
 
@@ -1263,22 +1475,10 @@ function showCLIRecovery(files, srcPath) {
 // ============================================================
 // ERROR LOG
 // ============================================================
-function loadErrors(db, scanId) {
+function renderErrors(scanId, errors) {
   const banner  = document.getElementById('error-banner');
   const bannerMsg = document.getElementById('error-banner-msg');
   const logBody = document.getElementById('error-log-body');
-
-  // Query errors table (may not exist on older DBs)
-  let errors = [];
-  try {
-    const res = db.exec(
-      `SELECT occurred_at, error_type, message, offset FROM scan_errors
-       WHERE scan_id=${scanId} ORDER BY occurred_at DESC LIMIT 200`
-    );
-    if (res.length) {
-      errors = res[0].values.map(([ts, type, msg, off]) => ({ ts, type, msg, off }));
-    }
-  } catch (e) { /* table doesn't exist yet — ignore */ }
 
   // Stall detection: scan not finished but updated_at is old
   const scan = S.scans.find(s => s.id === scanId);

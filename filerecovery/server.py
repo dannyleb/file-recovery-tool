@@ -10,6 +10,7 @@ Chrome allows http://localhost from an https page (secure context exception).
 
 import json
 import os
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Optional
@@ -18,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 _INDEX = Path(__file__).parent.parent / "index.html"
 
 from .db import ScanDB
+from .scanner import scan as run_scan
 from .source import Source
 
 DEFAULT_PORT = 7523
@@ -33,6 +35,10 @@ _VALIDATORS = {
     "PNG":    lambda b: b[:8] == b"\x89PNG\r\n\x1a\n",
     "GIF":    lambda b: b[:6] in (b"GIF87a", b"GIF89a"),
     "BMP":    lambda b: len(b) >= 6 and b[:2] == b"BM" and int.from_bytes(b[2:6], "little") > 54,
+    # MP4/MOV: f.offset points at the 4-byte box-size field, 4 bytes before the
+    # "ftyp" match (see signatures.py header_back_offset=4), so the type tag
+    # sits at bytes [4:8].
+    "MP4":    lambda b: len(b) >= 8 and b[4:8] == b"ftyp",
 }
 
 _MIME = {
@@ -41,7 +47,46 @@ _MIME = {
     "GIF":  "image/gif",
     "BMP":  "image/bmp",
     "PDF":  "application/pdf",
+    "MP4":  "video/mp4",
 }
+
+_FDA_HINT = (
+    "Permission denied. On macOS this usually means your terminal app doesn't "
+    "have Full Disk Access: System Settings -> Privacy & Security -> Full Disk "
+    "Access -> add your terminal app, then fully quit and relaunch it. sudo "
+    "does not bypass this restriction."
+)
+
+
+def _friendly_error(exc: Exception) -> str:
+    msg = str(exc)
+    if isinstance(exc, PermissionError) and "Full Disk Access" not in msg:
+        return f"{_FDA_HINT} ({msg})"
+    return msg
+
+
+def _real_home() -> str:
+    """The invoking user's home directory, not root's.
+
+    When this server runs under sudo, os.path.expanduser('~') resolves
+    against root's HOME (often /var/root), silently writing recovered files
+    somewhere the actual user can neither find nor read. SUDO_USER names the
+    real account, so prefer its home directory when present.
+    """
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        try:
+            import pwd
+            return pwd.getpwnam(sudo_user).pw_dir
+        except KeyError:
+            pass
+    return os.path.expanduser("~")
+
+
+def _expand(path: str) -> str:
+    if path == "~" or path.startswith("~/"):
+        return _real_home() + path[1:]
+    return path
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -72,6 +117,10 @@ class _Handler(BaseHTTPRequestHandler):
             body   = json.loads(self.rfile.read(length) or b"{}")
             if path == "/api/recover":
                 self._recover(body)
+            elif path == "/api/scan/start":
+                self._start_scan(body)
+            elif path == "/api/scan/stop":
+                self._stop_scan()
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as exc:
@@ -84,6 +133,28 @@ class _Handler(BaseHTTPRequestHandler):
                 "ok":     True,
                 "db":     self.server.db_path,
                 "source": self.server.source_path,
+            })
+
+        elif path == "/api/disks":
+            from .disks import list_disks
+            try:
+                disks = list_disks()
+                self._json([{
+                    "device":      d.device,
+                    "size_bytes":  d.size_bytes,
+                    "description": d.description,
+                    "removable":   d.removable,
+                } for d in disks])
+            except NotImplementedError as e:
+                self._json({"error": str(e)}, 501)
+
+        elif path == "/api/scan/active":
+            active = bool(self.server.scan_thread and self.server.scan_thread.is_alive())
+            self._json({
+                "active":  active,
+                "scan_id": self.server.scan_active_id,
+                "device":  self.server.source_path,
+                "error":   self.server.scan_error,
             })
 
         elif path == "/api/scans":
@@ -161,14 +232,17 @@ class _Handler(BaseHTTPRequestHandler):
             files = [f for f in db.list_found_files(scan_id) if f.file_type in _VALIDATORS]
 
         valid = []
-        with Source(src) as source:
-            for f in files:
-                try:
-                    header = source.read_at(f.offset, 16)
-                    if _VALIDATORS[f.file_type](header):
-                        valid.append(f.id)
-                except Exception:
-                    pass
+        try:
+            with Source(src) as source:
+                for f in files:
+                    try:
+                        header = source.read_at(f.offset, 16)
+                        if _VALIDATORS[f.file_type](header):
+                            valid.append(f.id)
+                    except Exception:
+                        pass
+        except PermissionError as e:
+            return self._json({"error": _friendly_error(e)}, 403)
 
         self._json({"valid": valid})
 
@@ -180,27 +254,82 @@ class _Handler(BaseHTTPRequestHandler):
 
         scan_id = body.get("scan_id")
         ids     = body.get("ids")      # list of ints, or "all"
-        dest    = body.get("dest", os.path.expanduser("~/recovered"))
-        dest    = os.path.expanduser(dest)
+        dest    = _expand(body.get("dest") or "~/recovered")
 
-        with ScanDB(self.server.db_path) as db:
-            if ids == "all":
-                targets = list(db.list_found_files(scan_id))
-            else:
-                targets = [db.get_found_file(int(i)) for i in ids]
-                targets = [f for f in targets if f is not None]
+        try:
+            with ScanDB(self.server.db_path) as db:
+                if ids == "all":
+                    targets = list(db.list_found_files(scan_id))
+                else:
+                    targets = [db.get_found_file(int(i)) for i in ids]
+                    targets = [f for f in targets if f is not None]
 
-            results = []
-            errors  = []
-            with Source(src) as source:
-                for f in targets:
-                    try:
-                        path = recover_file(source, db, f, dest)
-                        results.append({"id": f.id, "path": path})
-                    except RecoveryError as e:
-                        errors.append({"id": f.id, "error": str(e)})
+                results = []
+                errors  = []
+                with Source(src) as source:
+                    for f in targets:
+                        try:
+                            path = recover_file(source, db, f, dest)
+                            results.append({"id": f.id, "path": path})
+                        except RecoveryError as e:
+                            errors.append({"id": f.id, "error": str(e)})
+        except PermissionError as e:
+            return self._json({"error": _friendly_error(e)}, 403)
 
         self._json({"recovered": results, "errors": errors})
+
+    def _start_scan(self, body: dict):
+        device = body.get("device") or self.server.source_path
+        if not device:
+            return self._json({"error": "no device specified"}, 400)
+        if self.server.scan_thread and self.server.scan_thread.is_alive():
+            return self._json({"error": "a scan is already running on this server"}, 409)
+
+        resume_id  = body.get("resume_scan_id")
+        db_path    = self.server.db_path
+        stop_event = threading.Event()
+        self.server.scan_stop_event = stop_event
+        self.server.scan_error = None
+
+        def run():
+            try:
+                source = Source(device)
+            except Exception as e:
+                self.server.scan_error = _friendly_error(e)
+                return
+
+            with source, ScanDB(db_path) as db:
+                try:
+                    if resume_id is not None:
+                        scan_id = resume_id
+                        start_offset = db.resume_scan(scan_id)
+                    else:
+                        scan_id = db.start_scan(device, source.size)
+                        start_offset = 0
+                except Exception as e:
+                    self.server.scan_error = _friendly_error(e)
+                    return
+
+                self.server.scan_active_id = scan_id
+                try:
+                    run_scan(source, db, scan_id, start_offset=start_offset,
+                             stop_check=lambda: stop_event.is_set())
+                except Exception as e:
+                    self.server.scan_error = _friendly_error(e)
+                    db.log_error(scan_id, e)
+                finally:
+                    self.server.scan_active_id = None
+
+        self.server.source_path = device
+        t = threading.Thread(target=run, daemon=True)
+        self.server.scan_thread = t
+        t.start()
+        self._json({"ok": True, "device": device})
+
+    def _stop_scan(self):
+        if self.server.scan_stop_event:
+            self.server.scan_stop_event.set()
+        self._json({"ok": True})
 
     def _serve_preview(self, found_id: int):
         src = self.server.source_path
@@ -215,8 +344,11 @@ class _Handler(BaseHTTPRequestHandler):
         mime  = _MIME.get(f.file_type, "application/octet-stream")
         limit = min(f.length, PREVIEW_CAP)
 
-        with Source(src) as source:
-            data = source.read_at(f.offset, limit)
+        try:
+            with Source(src) as source:
+                data = source.read_at(f.offset, limit)
+        except PermissionError as e:
+            return self._json({"error": _friendly_error(e)}, 403)
 
         self.send_response(200)
         self._cors()
@@ -245,6 +377,10 @@ class _Server(HTTPServer):
     def __init__(self, db_path: str, source_path: Optional[str], port: int):
         self.db_path     = db_path
         self.source_path = source_path
+        self.scan_thread      = None
+        self.scan_stop_event  = None
+        self.scan_active_id   = None
+        self.scan_error       = None
         super().__init__(("127.0.0.1", port), _Handler)
 
 
@@ -252,7 +388,7 @@ def serve(db_path: str, source_path: Optional[str] = None, port: int = DEFAULT_P
     server = _Server(db_path, source_path, port)
     print(f"File Recovery server → http://localhost:{port}")
     print(f"  DB     : {db_path}")
-    print(f"  Source : {source_path or '(not set — previews disabled)'}")
+    print(f"  Source : {source_path or '(not set — pick a drive from the GUI to scan, or restart with --source for previews of an existing scan)'}")
     print(f"  GUI    : https://dannyleb.github.io/file-recovery-tool/")
     print("Press Ctrl+C to stop.\n")
     try:
