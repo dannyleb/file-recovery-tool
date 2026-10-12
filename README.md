@@ -341,12 +341,14 @@ machine.
 | POST | `/api/recover` | `{scan_id, ids: [...] or "all", dest}` → copies files, returns `{recovered, errors}` |
 | GET | `/` | Serves `index.html` itself |
 
-A `--source` must be set (explicitly at startup, or implicitly by starting a
-scan via `/api/scan/start`) for anything that reads the drive — previews,
-recover, valid-previews — without it those return `503`. `recover`'s `dest`
-defaults to `~/recovered`, resolved against the *invoking* user's home
-directory even when the server is running under `sudo` (via `SUDO_USER`) —
-not root's.
+Anything that reads the drive — previews, recover, valid-previews — needs a
+source device/image for that scan. Each scan already has one recorded in
+the DB (whichever device it was run against, whether that scan was started
+from the CLI or from `/api/scan/start`), and the server looks that up
+automatically; `--source` at startup is only a fallback for a scan the DB
+has no row for, and otherwise unnecessary. `recover`'s `dest` defaults to
+`~/recovered`, resolved against the *invoking* user's home directory even
+when the server is running under `sudo` (via `SUDO_USER`) — not root's.
 
 ## Legacy desktop GUI (PyQt6)
 

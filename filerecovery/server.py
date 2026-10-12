@@ -232,12 +232,24 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _valid_previews(self, scan_id: int):
-        src = self.server.source_path
-        if not src:
-            return self._json({"error": "no source configured"}, 503)
+    def _source_for_scan(self, db: ScanDB, scan_id: int) -> Optional[str]:
+        """The device/image to read for this scan.
 
+        The scan's own source_path (recorded in the DB when it ran, whether
+        that was via the CLI or this server) is authoritative -- it's
+        exactly the device that scan's offsets refer to. --source is only a
+        fallback for a scan_id the DB doesn't have a row for.
+        """
+        row = db.get_scan(scan_id)
+        if row is not None and row["source_path"]:
+            return row["source_path"]
+        return self.server.source_path
+
+    def _valid_previews(self, scan_id: int):
         with ScanDB(self.server.db_path) as db:
+            src = self._source_for_scan(db, scan_id)
+            if not src:
+                return self._json({"error": "no source configured"}, 503)
             files = [f for f in db.list_found_files(scan_id) if f.file_type in _VALIDATORS]
 
         valid = []
@@ -257,16 +269,16 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _recover(self, body: dict):
         from .recover import RecoveryError, recover_file
-        src = self.server.source_path
-        if not src:
-            return self._json({"error": "no source configured — restart server with --source"}, 503)
-
         scan_id = body.get("scan_id")
         ids     = body.get("ids")      # list of ints, or "all"
         dest    = _expand(body.get("dest") or "~/recovered")
 
         try:
             with ScanDB(self.server.db_path) as db:
+                src = self._source_for_scan(db, scan_id)
+                if not src:
+                    return self._json({"error": "no source configured — restart server with --source"}, 503)
+
                 if ids == "all":
                     targets = list(db.list_found_files(scan_id))
                 else:
@@ -337,14 +349,13 @@ class _Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "device": device})
 
     def _serve_preview(self, found_id: int):
-        src = self.server.source_path
-        if not src:
-            return self._json({"error": "no source configured"}, 503)
-
         with ScanDB(self.server.db_path) as db:
             f = db.get_found_file(found_id)
-        if f is None:
-            return self._json({"error": "not found"}, 404)
+            if f is None:
+                return self._json({"error": "not found"}, 404)
+            src = self._source_for_scan(db, f.scan_id)
+        if not src:
+            return self._json({"error": "no source configured"}, 503)
 
         mime  = _MIME.get(f.file_type, "application/octet-stream")
         limit = min(f.length, PREVIEW_CAP)
@@ -392,7 +403,7 @@ def serve(db_path: str, source_path: Optional[str] = None, port: int = DEFAULT_P
     server = _Server(db_path, source_path, port)
     print(f"File Recovery server → http://localhost:{port}")
     print(f"  DB     : {db_path}")
-    print(f"  Source : {source_path or '(not set — pick a drive from the GUI to scan, or restart with --source for previews of an existing scan)'}")
+    print(f"  Source : {source_path or '(not set — fine for existing scans, each one records its own source device; needed only as a fallback)'}")
     print(f"  GUI    : https://dannyleb.github.io/file-recovery-tool/")
     print("Press Ctrl+C to stop.\n")
     try:
