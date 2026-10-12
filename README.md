@@ -12,6 +12,25 @@ then work out exactly how long that file is by parsing the format's own
 internal structure (or, when that's not possible, by capping at a sane
 maximum size).
 
+## Table of Contents
+
+- [Quickstart](#quickstart)
+  - [macOS](#macos)
+  - [Linux](#linux)
+  - [Windows](#windows)
+- [Architecture](#architecture)
+  - [Supported types & how each one is bounded](#supported-types--how-each-one-is-bounded)
+  - [Read layer (`source.py`)](#read-layer-sourcepy)
+  - [Database (`db.py`)](#database-dbpy)
+- [Install](#install)
+- [Running the GUI (current, recommended path)](#running-the-gui-current-recommended-path)
+  - [API reference (`filerecovery/server.py`)](#api-reference-filerecoveryserverpy)
+- [Legacy desktop GUI (PyQt6)](#legacy-desktop-gui-pyqt6)
+- [CLI usage (works standalone, no GUI/server needed)](#cli-usage-works-standalone-no-guiserver-needed)
+- [Limitations](#limitations)
+- [A note on safety](#a-note-on-safety)
+- [Development](#development)
+
 ## Quickstart
 
 Pick your OS. Steps 1–3 (get the code, install, open the GUI) are the same
