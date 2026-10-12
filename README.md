@@ -12,7 +12,12 @@ then work out exactly how long that file is by parsing the format's own
 internal structure (or, when that's not possible, by capping at a sane
 maximum size).
 
-## Quickstart (macOS, from scratch)
+## Quickstart
+
+Pick your OS. Steps 1–3 (get the code, install, open the GUI) are the same
+shape everywhere; raw disk access (step 4 onward) differs per platform.
+
+### macOS
 
 ```bash
 # 1. Get the code
@@ -72,6 +77,95 @@ does **not** bypass this — root privileges and Full Disk Access are two
 separate permission systems on modern macOS, and raw disk reads (plus
 writes to protected folders like Desktop/Documents/Downloads) need the
 latter regardless of UID.
+
+### Linux
+
+```bash
+# 1. Get the code
+git clone https://github.com/dannyleb/file-recovery-tool
+cd file-recovery-tool
+
+# 2. Install (if venv creation fails, install it first: sudo apt install python3-venv)
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+
+# 3. Confirm the install and find your drive
+which filerecovery
+filerecovery list-disks
+```
+
+`list-disks` shells out to `lsblk` and prints each attached drive as
+`/dev/sdX` (or `/dev/nvmeXnY`, etc.) — no `r`-prefix trick needed, unlike
+macOS. Double-check the size against `lsblk` or your file manager's disk
+view before continuing.
+
+```bash
+# 4. Start the local server (needs root for raw disk access)
+sudo "$(which filerecovery)" serve --db ~/recovery.db --port 7523
+```
+
+Same `sudo "$(which filerecovery)" ...` reasoning as macOS: plain `sudo
+filerecovery ...` won't find a venv-installed binary because `sudo` resets
+`PATH`. Unlike macOS, there's no second permission layer to fight — once
+you're root, raw block-device reads just work.
+
+Then in your browser, same as macOS: go to
+**https://dannyleb.github.io/file-recovery-tool/**, **Open DB…** the file
+from step 4, **Scan Disk…**, pick your drive, and recover.
+
+### Windows
+
+**Current support level, honestly:** scanning a **disk image file**
+(`.img`/`.dd`/a raw export from your imaging tool of choice) is the
+verified-to-work path — it's just ordinary file I/O, no platform-specific
+code involved. Scanning a **live physical drive** directly
+(`\\.\PhysicalDriveN`) is untested on Windows; the sector-alignment and
+chunked-read logic in `source.py` was written and verified against macOS
+and Linux raw devices, and Windows' equivalent may behave differently. Try
+it if you want (see below), but image-then-scan is the safer bet for now.
+`list-disks` isn't implemented on Windows yet — it'll tell you so and point
+you at Disk Management instead.
+
+```powershell
+# 1. Get the code
+git clone https://github.com/dannyleb/file-recovery-tool
+cd file-recovery-tool
+
+# 2. Install
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e .
+```
+
+If `Activate.ps1` is blocked ("running scripts is disabled on this
+system"), either run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy
+Bypass` first, or use `.venv\Scripts\activate.bat` from `cmd.exe` instead.
+
+```powershell
+# 3. Scan a disk image (recommended path)
+filerecovery scan C:\path\to\image.img --db C:\path\to\recovery.db
+```
+
+To try a live drive instead, open PowerShell **as Administrator**, find
+your drive number in Disk Management (Win+X → Disk Management — the
+number next to "Disk", e.g. `Disk 1`), then:
+
+```powershell
+filerecovery scan \\.\PhysicalDrive1 --db C:\path\to\recovery.db
+```
+
+Then start the server and use the browser GUI the same way as macOS/Linux:
+
+```powershell
+filerecovery serve --db C:\path\to\recovery.db --port 7523
+```
+
+Go to **https://dannyleb.github.io/file-recovery-tool/**, **Open DB…** the
+file from the command above, and browse/recover from there. (`Scan Disk…`
+in the GUI depends on `list-disks`, so it won't list drives on Windows yet
+— scan from the command line as shown above instead, then use the GUI to
+browse results and recover.)
 
 ## Architecture
 

@@ -1,6 +1,5 @@
 """Read-only access to a block device or disk image, with random access by offset."""
 
-import fcntl
 import os
 import stat
 import struct
@@ -13,12 +12,16 @@ def get_size(path: str) -> int:
     if stat.S_ISREG(st.st_mode):
         return st.st_size
 
-    # Block/character special device (e.g. /dev/rdisk2 on macOS, /dev/sdb on Linux):
-    # st_size is usually 0, so we need platform-specific methods.
+    # Block/character special device (e.g. /dev/rdisk2 on macOS, /dev/sdb on
+    # Linux, \\.\PhysicalDriveN on Windows): st_size is usually 0, so we need
+    # platform-specific methods.
     fd = os.open(path, os.O_RDONLY)
     try:
         if sys.platform == "darwin":
             # macOS: lseek(SEEK_END) returns 0 on raw devices; use ioctl instead.
+            # fcntl has no Windows port, so it's imported here, not at module
+            # level, or importing this module at all would crash on Windows.
+            import fcntl
             DKIOCGETBLOCKCOUNT = 0x40086419
             DKIOCGETBLOCKSIZE  = 0x40046418
             block_count = struct.unpack("Q", fcntl.ioctl(fd, DKIOCGETBLOCKCOUNT, b"\x00" * 8))[0]
