@@ -72,6 +72,17 @@ class _Handler(BaseHTTPRequestHandler):
             body   = json.loads(self.rfile.read(length) or b"{}")
             if path == "/api/recover":
                 self._recover(body)
+            elif path.startswith("/api/scans/") and path.endswith("/stop"):
+                scan_id = int(path.split("/")[3])
+                with ScanDB(self.server.db_path) as db:
+                    row = db.get_scan(scan_id)
+                    if row is None:
+                        self._json({"error": "not found"}, 404)
+                    elif row["finished_at"] is not None:
+                        self._json({"error": "scan already finished"}, 409)
+                    else:
+                        db.request_stop(scan_id)
+                        self._json({"ok": True, "scan_id": scan_id})
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as exc:

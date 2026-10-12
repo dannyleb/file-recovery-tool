@@ -64,14 +64,22 @@ def cmd_scan(args):
             print(f"\r  {_fmt_size(done)} / {_fmt_size(total)} ({pct:.1f}%)", end="", flush=True)
 
         try:
-            found = run_scan(source, db, scan_id, start_offset=start_offset, progress_cb=progress)
+            found = run_scan(
+                source, db, scan_id,
+                start_offset=start_offset,
+                progress_cb=progress,
+                stop_check=lambda: db.is_stop_requested(scan_id),
+            )
         except KeyboardInterrupt:
             print(f"\nInterrupted. Resume with: filerecovery scan {args.device} --db {args.db} --resume {scan_id}")
             return 130
         except Exception as e:
             db.log_error(scan_id, e)
             raise
-        print(f"\nDone. Found {found} file(s) this run. Browse with: filerecovery list --db {args.db} {scan_id}")
+        if db.is_stop_requested(scan_id):
+            print(f"\nStopped. Found {found} file(s). Resume with: filerecovery scan {args.device} --db {args.db} --resume {scan_id}")
+        else:
+            print(f"\nDone. Found {found} file(s) this run. Browse with: filerecovery list --db {args.db} {scan_id}")
         return 0
 
 
